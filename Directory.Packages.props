@@ -6,8 +6,8 @@
   <!-- Compendium framework — consumed as published NuGets (nuget.org).
        Compendium.Abstractions.AI is NOT pinned here: it lives in this repo (src/Compendium.Abstractions.AI). -->
   <ItemGroup>
-    <PackageVersion Include="Compendium.Core" Version="1.0.5-preview.1" />
-    <PackageVersion Include="Compendium.Abstractions" Version="1.0.5-preview.1" />
+    <PackageVersion Include="Compendium.Core" Version="1.0.5-preview.5" />
+    <PackageVersion Include="Compendium.Abstractions" Version="1.0.5-preview.5" />
   </ItemGroup>
 
   <!-- Build-time tooling -->
