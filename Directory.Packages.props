@@ -17,7 +17,7 @@
 
   <!-- Production runtime (union of the 12 source adapter repos; conflicts resolved highest-wins) -->
   <ItemGroup>
-    <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.17.9" />
+    <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.101.6" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
