@@ -12,6 +12,6 @@ global using Compendium.Adapters.OpenAI.Configuration;
 global using Compendium.Adapters.OpenAI.DependencyInjection;
 global using Compendium.Adapters.OpenAI.StructuredOutputs;
 global using Compendium.Adapters.OpenAI.Tools;
-global using FluentAssertions;
+global using AwesomeAssertions;
 global using Microsoft.Extensions.DependencyInjection;
 global using Xunit;

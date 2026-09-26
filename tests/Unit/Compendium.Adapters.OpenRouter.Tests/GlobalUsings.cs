@@ -1,5 +1,5 @@
 global using Xunit;
-global using FluentAssertions;
+global using AwesomeAssertions;
 global using NSubstitute;
 global using Moq;
 global using Compendium.Abstractions.AI;

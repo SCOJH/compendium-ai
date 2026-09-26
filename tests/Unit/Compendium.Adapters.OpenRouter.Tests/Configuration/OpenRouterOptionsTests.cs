@@ -1,5 +1,5 @@
 using Compendium.Adapters.OpenRouter.Configuration;
-using FluentAssertions;
+using AwesomeAssertions;
 
 namespace Compendium.Adapters.OpenRouter.Tests.Configuration;
 

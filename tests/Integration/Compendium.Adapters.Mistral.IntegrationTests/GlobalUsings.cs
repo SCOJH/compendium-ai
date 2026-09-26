@@ -11,7 +11,7 @@ global using Compendium.Abstractions.AI.Models;
 global using Compendium.Adapters.Mistral.DependencyInjection;
 global using Compendium.Adapters.Mistral.Tools;
 global using Compendium.Adapters.Mistral.StructuredOutputs;
-global using FluentAssertions;
+global using AwesomeAssertions;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Xunit;

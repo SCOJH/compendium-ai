@@ -14,7 +14,7 @@ global using Compendium.Abstractions.AI.Models;
 global using Compendium.Adapters.DeepSeek.Configuration;
 global using Compendium.Adapters.DeepSeek.Services;
 global using Compendium.Core.Results;
-global using FluentAssertions;
+global using AwesomeAssertions;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using RichardSzalay.MockHttp;
