@@ -6,7 +6,7 @@
 // -----------------------------------------------------------------------
 
 global using Xunit;
-global using FluentAssertions;
+global using AwesomeAssertions;
 global using Compendium.Abstractions.AI;
 global using Compendium.Abstractions.AI.Models;
 global using Compendium.Adapters.Ollama.Configuration;
