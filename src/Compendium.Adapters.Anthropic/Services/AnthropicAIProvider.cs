@@ -71,7 +71,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
         var result = await _httpClient.CreateMessageAsync(apiRequest, cancellationToken);
 
         return result.Match(
-            apiResponse => Result.Success(MapToCompletionResponse(apiResponse)),
+            apiResponse => Result.Success(MapToCompletionResponse(apiResponse, request.Reasoning is { IncludeReasoning: true })),
             error => Result.Failure<CompletionResponse>(error));
     }
 
@@ -85,6 +85,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
         _logger.LogDebug("Sending Anthropic streaming message request to model {Model}", model);
 
         var apiRequest = MapToApiRequest(request, model, stream: true);
+        var surfaceReasoning = request.Reasoning is { IncludeReasoning: true };
 
         var messageId = string.Empty;
         var index = 0;
@@ -116,6 +117,24 @@ internal sealed class AnthropicAIProvider : IAIProvider
                     break;
 
                 case "content_block_delta":
+                    // Extended thinking (ReasoningOptions): its text comes apart from the answer, never as ContentDelta.
+                    if (string.Equals(streamEvent.Delta?.Type, "thinking_delta", StringComparison.Ordinal))
+                    {
+                        if (surfaceReasoning && !string.IsNullOrEmpty(streamEvent.Delta?.Thinking))
+                        {
+                            yield return Result.Success(new CompletionChunk
+                            {
+                                Id = messageId,
+                                ContentDelta = string.Empty,
+                                ReasoningDelta = streamEvent.Delta.Thinking,
+                                Index = index++,
+                                IsFinal = false,
+                            });
+                        }
+
+                        break;
+                    }
+
                     if (streamEvent.Delta?.Text is { } text)
                     {
                         yield return Result.Success(new CompletionChunk
@@ -269,7 +288,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
             metadata = new AnthropicRequestMetadata { UserId = request.UserId };
         }
 
-        return new AnthropicMessagesRequest
+        var apiRequest = new AnthropicMessagesRequest
         {
             Model = model,
             Messages = messages,
@@ -284,6 +303,15 @@ internal sealed class AnthropicAIProvider : IAIProvider
             Stream = stream ? true : null,
             Metadata = metadata,
         };
+
+        // Extended thinking: the model's own reasoning channel, as the model takes it (ClaudeReasoning). It counts against
+        // max_tokens and takes no sampling parameter, which Apply sees to; a model without thinking gets the request as is.
+        if (request.Reasoning is { } reasoning && !ClaudeReasoning.Apply(apiRequest, reasoning))
+        {
+            _logger.LogDebug("Model {Model} has no extended thinking: the request is sent without it", model);
+        }
+
+        return apiRequest;
     }
 
     private static string? CombineSystemPrompt(string? primary, StringBuilder addendum)
@@ -306,15 +334,20 @@ internal sealed class AnthropicAIProvider : IAIProvider
         return primary + "\n" + addendum;
     }
 
-    private static CompletionResponse MapToCompletionResponse(AnthropicMessagesResponse apiResponse)
+    private static CompletionResponse MapToCompletionResponse(AnthropicMessagesResponse apiResponse, bool surfaceReasoning)
     {
         var text = ExtractText(apiResponse.Content);
+
+        var thinking = string.Concat(apiResponse.Content
+            .Where(b => string.Equals(b.Type, "thinking", StringComparison.Ordinal))
+            .Select(b => b.Thinking ?? string.Empty));
 
         return new CompletionResponse
         {
             Id = apiResponse.Id,
             Model = apiResponse.Model,
             Content = text,
+            Reasoning = surfaceReasoning && thinking.Length > 0 ? thinking : null,
             FinishReason = MapStopReason(apiResponse.StopReason),
             Usage = new UsageStats
             {
@@ -334,7 +367,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         if (blocks.Count == 1)
         {
-            return blocks[0].Text ?? string.Empty;
+            return string.Equals(blocks[0].Type, "thinking", StringComparison.Ordinal) ? string.Empty : blocks[0].Text ?? string.Empty;
         }
 
         var sb = new StringBuilder();

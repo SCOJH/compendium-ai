@@ -68,7 +68,7 @@ internal sealed class MistralAIProvider : IAIProvider
         var apiRequest = MapToApiRequest(request, model, stream: false);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
-            r => Result.Success(MapToCompletionResponse(r)),
+            r => Result.Success(MapToCompletionResponse(r, request.Reasoning is { IncludeReasoning: true })),
             error => Result.Failure<CompletionResponse>(error));
     }
 
@@ -91,7 +91,7 @@ internal sealed class MistralAIProvider : IAIProvider
                 yield break;
             }
 
-            var completionChunk = MapToCompletionChunk(chunk.Value, index++);
+            var completionChunk = MapToCompletionChunk(chunk.Value, index++, request.Reasoning is { IncludeReasoning: true });
             yield return Result.Success(completionChunk);
 
             if (completionChunk.IsFinal)
@@ -216,7 +216,11 @@ internal sealed class MistralAIProvider : IAIProvider
             MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
             TopP = request.TopP,
             Stop = request.StopSequences?.ToList(),
-            Stream = stream
+            Stream = stream,
+
+            // Mistral's reasoning has one setting that returns the thinking: "high". The sampling parameters stay: a
+            // reasoning model takes them (Magistral recommends 0.7 / 0.95).
+            ReasoningEffort = request.Reasoning is null ? null : "high"
         };
 
         ApplyTools(apiRequest, request);
@@ -366,11 +370,12 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    private static CompletionResponse MapToCompletionResponse(MistralChatCompletionResponse apiResponse)
+    private static CompletionResponse MapToCompletionResponse(MistralChatCompletionResponse apiResponse, bool surfaceReasoning)
     {
         var choice = apiResponse.Choices.FirstOrDefault();
         var message = choice?.Message;
         var content = MaterialiseContent(message?.Content);
+        var reasoning = MaterialiseThinking(message?.Content);
 
         IReadOnlyDictionary<string, object>? metadata = null;
         if (message?.ToolCalls != null && message.ToolCalls.Count > 0)
@@ -387,6 +392,7 @@ internal sealed class MistralAIProvider : IAIProvider
             Id = apiResponse.Id,
             Model = apiResponse.Model,
             Content = content,
+            Reasoning = surfaceReasoning && reasoning.Length > 0 ? reasoning : null,
             FinishReason = MapFinishReason(choice?.FinishReason),
             Usage = new UsageStats
             {
@@ -430,6 +436,74 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
+    /// <summary>
+    /// The thinking of a reasoning model's content parts: <c>{type: "thinking", thinking: [{type: "text", text}]}</c>,
+    /// kept apart from the answer. Empty for plain content.
+    /// </summary>
+    private static string MaterialiseThinking(object? raw)
+    {
+        if (raw is not JsonElement el || el.ValueKind != JsonValueKind.Array)
+        {
+            return string.Empty;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var part in el.EnumerateArray())
+        {
+            AppendThinking(sb, part);
+        }
+
+        return sb.ToString();
+    }
+
+    private static void AppendThinking(System.Text.StringBuilder sb, JsonElement part)
+    {
+        if (part.ValueKind == JsonValueKind.Object
+            && part.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "thinking"
+            && part.TryGetProperty("thinking", out var inner) && inner.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var piece in inner.EnumerateArray())
+            {
+                if (piece.ValueKind == JsonValueKind.Object && piece.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                {
+                    sb.Append(text.GetString());
+                }
+            }
+        }
+    }
+
+    /// <summary>A streamed delta's answer text and thinking text: a string is answer, a list is split by chunk type.</summary>
+    private static (string Content, string? Thinking) SplitDelta(JsonElement? content)
+    {
+        if (content is not { } el)
+        {
+            return (string.Empty, null);
+        }
+
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.String:
+                return (el.GetString() ?? string.Empty, null);
+            case JsonValueKind.Array:
+                var answer = new System.Text.StringBuilder();
+                var thinking = new System.Text.StringBuilder();
+                foreach (var part in el.EnumerateArray())
+                {
+                    AppendThinking(thinking, part);
+                    if (part.ValueKind == JsonValueKind.Object
+                        && part.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "text"
+                        && part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                    {
+                        answer.Append(text.GetString());
+                    }
+                }
+
+                return (answer.ToString(), thinking.Length == 0 ? null : thinking.ToString());
+            default:
+                return (string.Empty, null);
+        }
+    }
+
     private static AgentToolInvocation MapToAgentToolInvocation(MistralToolCall toolCall)
     {
         return new AgentToolInvocation(
@@ -440,15 +514,18 @@ internal sealed class MistralAIProvider : IAIProvider
             Latency: TimeSpan.Zero);
     }
 
-    private static CompletionChunk MapToCompletionChunk(MistralStreamChunk chunk, int index)
+    private static CompletionChunk MapToCompletionChunk(MistralStreamChunk chunk, int index, bool surfaceReasoning)
     {
         var choice = chunk.Choices.FirstOrDefault();
         var isFinal = choice?.FinishReason != null;
+        var (content, thinking) = SplitDelta(choice?.Delta?.Content);
 
         return new CompletionChunk
         {
             Id = chunk.Id,
-            ContentDelta = choice?.Delta?.Content ?? string.Empty,
+            ContentDelta = content,
+            // The thinking of a reasoning model is never answer text; it is returned when asked for (ReasoningOptions).
+            ReasoningDelta = surfaceReasoning ? thinking : null,
             Index = index,
             IsFinal = isFinal,
             FinishReason = isFinal ? MapFinishReason(choice?.FinishReason) : null,

@@ -215,10 +215,46 @@ internal sealed class OpenAIAIProvider : IAIProvider
             apiRequest.StreamOptions = new OpenAIStreamOptions { IncludeUsage = true };
         }
 
+        ApplyReasoning(apiRequest, request.Reasoning);
         ApplyTools(apiRequest, request);
         ApplyResponseFormat(apiRequest, request);
         return apiRequest;
     }
+
+    /// <summary>
+    /// The reasoning models' channel (o-series, GPT-5): <c>reasoning_effort</c>, and the request they accept —
+    /// <c>max_completion_tokens</c> instead of <c>max_tokens</c> (it bounds the reasoning too, so a budget is added to it
+    /// as headroom), and no temperature, top_p or penalty, which they refuse. The Chat Completions API returns no reasoning
+    /// text; the tokens it took come back as <see cref="UsageStats.ReasoningTokens"/>.
+    /// </summary>
+    private static void ApplyReasoning(OpenAIChatCompletionRequest apiRequest, ReasoningOptions? reasoning)
+    {
+        if (reasoning is null)
+        {
+            return;
+        }
+
+        apiRequest.ReasoningEffort = reasoning.Effort switch
+        {
+            ReasoningEffort.Low => "low",
+            ReasoningEffort.Medium => "medium",
+            ReasoningEffort.High or ReasoningEffort.XHigh or ReasoningEffort.Max => "high",
+            _ => null,
+        };
+        apiRequest.MaxCompletionTokens = apiRequest.MaxTokens + Math.Max(0, reasoning.BudgetTokens ?? 0);
+        apiRequest.MaxTokens = null;
+        apiRequest.Temperature = null;
+        apiRequest.TopP = null;
+        apiRequest.FrequencyPenalty = null;
+        apiRequest.PresencePenalty = null;
+    }
+
+    private static UsageStats MapUsage(OpenAIUsage? usage) => new()
+    {
+        PromptTokens = usage?.PromptTokens ?? 0,
+        CompletionTokens = usage?.CompletionTokens ?? 0,
+        ReasoningTokens = usage?.CompletionTokensDetails?.ReasoningTokens,
+    };
 
     private static void ApplyTools(OpenAIChatCompletionRequest apiRequest, CompletionRequest request)
     {
@@ -332,11 +368,7 @@ internal sealed class OpenAIAIProvider : IAIProvider
             Model = apiResponse.Model,
             Content = content,
             FinishReason = MapFinishReason(choice?.FinishReason),
-            Usage = new UsageStats
-            {
-                PromptTokens = apiResponse.Usage?.PromptTokens ?? 0,
-                CompletionTokens = apiResponse.Usage?.CompletionTokens ?? 0
-            },
+            Usage = MapUsage(apiResponse.Usage),
             CreatedAt = apiResponse.Created > 0
                 ? DateTimeOffset.FromUnixTimeSeconds(apiResponse.Created).UtcDateTime
                 : DateTime.UtcNow,
@@ -366,13 +398,7 @@ internal sealed class OpenAIAIProvider : IAIProvider
             Index = index,
             IsFinal = isFinal,
             FinishReason = isFinal ? MapFinishReason(choice?.FinishReason) : null,
-            Usage = chunk.Usage != null
-                ? new UsageStats
-                {
-                    PromptTokens = chunk.Usage.PromptTokens,
-                    CompletionTokens = chunk.Usage.CompletionTokens
-                }
-                : null
+            Usage = chunk.Usage != null ? MapUsage(chunk.Usage) : null
         };
     }
 

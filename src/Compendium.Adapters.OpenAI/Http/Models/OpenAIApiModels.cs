@@ -24,6 +24,14 @@ internal sealed class OpenAIChatCompletionRequest
     [JsonPropertyName("max_tokens")]
     public int? MaxTokens { get; set; }
 
+    /// <summary>What reasoning models take instead of <c>max_tokens</c>: the answer AND the reasoning tokens.</summary>
+    [JsonPropertyName("max_completion_tokens")]
+    public int? MaxCompletionTokens { get; set; }
+
+    /// <summary>The reasoning models' effort (<c>low</c>, <c>medium</c>, <c>high</c>).</summary>
+    [JsonPropertyName("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
+
     [JsonPropertyName("top_p")]
     public float? TopP { get; set; }
 
@@ -203,6 +211,16 @@ internal sealed class OpenAIUsage
 
     [JsonPropertyName("total_tokens")]
     public int TotalTokens { get; set; }
+
+    [JsonPropertyName("completion_tokens_details")]
+    public OpenAICompletionTokensDetails? CompletionTokensDetails { get; set; }
+}
+
+/// <summary>How the completion tokens split: <c>reasoning_tokens</c> on the reasoning models.</summary>
+internal sealed class OpenAICompletionTokensDetails
+{
+    [JsonPropertyName("reasoning_tokens")]
+    public int? ReasoningTokens { get; set; }
 }
 
 /// <summary>
