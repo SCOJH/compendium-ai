@@ -273,7 +273,7 @@ internal sealed class OllamaAIProvider : IAIProvider
         var maxTokens = request.MaxTokens ?? _options.DefaultMaxTokens;
         return new OllamaRequestOptions
         {
-            Temperature = request.Temperature,
+            Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
             TopP = request.TopP,
             FrequencyPenalty = request.FrequencyPenalty,
             PresencePenalty = request.PresencePenalty,

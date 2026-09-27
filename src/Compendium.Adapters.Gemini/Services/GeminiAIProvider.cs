@@ -262,7 +262,7 @@ internal sealed class GeminiAIProvider : IAIProvider
 
     private GeminiGenerationConfig BuildGenerationConfig(CompletionRequest request) => new()
     {
-        Temperature = request.Temperature,
+        Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
         TopP = request.TopP,
         MaxOutputTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
         FrequencyPenalty = request.FrequencyPenalty,

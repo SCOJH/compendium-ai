@@ -301,6 +301,29 @@ public class BedrockAIProviderTests
         captured!.InferenceConfig.Temperature.Should().BeNull();
     }
 
+    [Fact]
+    public async Task CompleteAsync_WithoutTemperature_SendsTheFallbackTemperature()
+    {
+        // Arrange
+        var client = Substitute.For<IAmazonBedrockRuntime>();
+        ConverseRequest? captured = null;
+        client.ConverseAsync(Arg.Do<ConverseRequest>(r => captured = r), Arg.Any<CancellationToken>())
+            .Returns(BedrockTestFactories.SuccessConverseResponse());
+        var sut = BedrockTestFactories.CreateProvider(client);
+
+        // Act
+        await sut.CompleteAsync(new CompletionRequest
+        {
+            Model = null!,
+            Messages = [Message.User("x")],
+        });
+
+        // Assert
+        captured!.InferenceConfig.Temperature.Should().BeApproximately(CompletionRequest.FallbackTemperature, 0.001f,
+            "an unset temperature keeps sending the former default");
+        captured.InferenceConfig.TopP.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, "AI.InvalidApiKey")]
     [InlineData(HttpStatusCode.Forbidden, "AI.InvalidApiKey")]

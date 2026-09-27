@@ -159,7 +159,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         {
             Model = model,
             Messages = messages,
-            Temperature = request.Temperature,
+            Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
             MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
             TopP = request.TopP,
             FrequencyPenalty = request.FrequencyPenalty,

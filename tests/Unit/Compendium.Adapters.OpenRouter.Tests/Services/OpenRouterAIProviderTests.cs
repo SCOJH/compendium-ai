@@ -153,6 +153,28 @@ public class OpenRouterAIProviderTests
     }
 
     [Fact]
+    public async Task CompleteAsync_WithoutTemperature_SendsTheFallbackTemperature()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        string? body = null;
+        handler.When(HttpMethod.Post, "*/chat/completions")
+            .With(req =>
+            {
+                body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", """{"id":"x","model":"m","created":0,"choices":[]}""");
+
+        // Act
+        await sut.CompleteAsync(TestFactories.SimpleCompletionRequest(), CancellationToken.None);
+
+        // Assert
+        body!.Should().Contain("\"temperature\":0.7", "an unset temperature keeps sending the former default");
+    }
+
+    [Fact]
     public async Task CompleteAsync_WithSystemPrompt_PrependsSystemMessage()
     {
         // Arrange

@@ -140,6 +140,31 @@ public class OllamaAIProviderTests
     }
 
     [Fact]
+    public async Task CompleteAsync_WithoutTemperature_SendsTheFallbackTemperature()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        string? capturedBody = null;
+        handler.When(HttpMethod.Post, "*/api/chat")
+            .With(req =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json",
+                """{"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":true,"done_reason":"stop"}""");
+
+        // Act
+        await sut.CompleteAsync(TestFactories.SimpleCompletionRequest(), CancellationToken.None);
+
+        // Assert
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.GetProperty("options").GetProperty("temperature").GetSingle()
+            .Should().Be(CompletionRequest.FallbackTemperature, "an unset temperature keeps sending the former default");
+    }
+
+    [Fact]
     public async Task CompleteAsync_WithEmptyModel_UsesDefaultFromOptions()
     {
         // Arrange

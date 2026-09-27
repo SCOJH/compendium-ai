@@ -351,13 +351,17 @@ internal sealed class BedrockAIProvider : IAIProvider
         });
     }
 
-    private InferenceConfiguration BuildInferenceConfig(CompletionRequest request) => new()
+    private InferenceConfiguration BuildInferenceConfig(CompletionRequest request)
     {
-        MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
-        Temperature = request.Temperature is > 0 ? request.Temperature : null,
-        TopP = request.TopP,
-        StopSequences = request.StopSequences is { Count: > 0 } ? [.. request.StopSequences] : null,
-    };
+        var temperature = request.Temperature ?? CompletionRequest.FallbackTemperature;
+        return new()
+        {
+            MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
+            Temperature = temperature > 0 ? temperature : null,
+            TopP = request.TopP,
+            StopSequences = request.StopSequences is { Count: > 0 } ? [.. request.StopSequences] : null,
+        };
+    }
 
     private static CompletionResponse MapResponse(ConverseResponse response, string modelId)
     {

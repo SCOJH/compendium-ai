@@ -275,6 +275,9 @@ internal sealed class AnthropicAIProvider : IAIProvider
             Messages = messages,
             MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
             System = systemBlocks,
+
+            // Unset stays unset, with no fallback: Claude Opus 4.7 and later, Sonnet 5, Fable and Mythos answer any
+            // temperature or top_p with a 400, and the null fields are left out of the body.
             Temperature = request.Temperature,
             TopP = request.TopP,
             StopSequences = request.StopSequences?.ToList(),
