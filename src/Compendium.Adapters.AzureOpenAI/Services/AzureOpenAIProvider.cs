@@ -252,7 +252,7 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         var apiRequest = new AzureOpenAIChatCompletionRequest
         {
             Messages = messages,
-            Temperature = request.Temperature,
+            Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
             MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
             TopP = request.TopP,
             FrequencyPenalty = request.FrequencyPenalty,

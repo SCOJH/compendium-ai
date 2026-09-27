@@ -54,8 +54,8 @@ Integration tests (`tests/Integration/*`) require live provider credentials and/
 ## Releasing
 
 Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 13 packages and publishes to
-GitHub Packages (primary feed); nuget.org publish runs when `NUGET_API_KEY` is configured, otherwise it
-warn-skips.
+GitHub Packages (primary feed), then to nuget.org (Trusted Publishing, or `NUGET_API_KEY`): with neither
+credential that step fails the run, after the GitHub Packages push.
 
 ## Provenance
 

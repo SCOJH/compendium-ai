@@ -169,6 +169,85 @@ public class AnthropicAIProviderTests
         body.Should().Contain("\"max_tokens\":1234");
     }
 
+    // Claude Opus 4.7 and later, Sonnet 5, Fable and Mythos answer any temperature or top_p with a 400: a request
+    // that sets neither must carry neither, on both paths.
+    [Fact]
+    public async Task CompleteAsync_WithoutTemperatureOrTopP_SendsNeither()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        string? body = null;
+        handler.When(HttpMethod.Post, "*/v1/messages")
+            .With(req =>
+            {
+                body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", """{"id":"x","model":"claude-opus-5","content":[]}""");
+
+        // Act
+        await sut.CompleteAsync(TestFactories.SimpleCompletionRequest("claude-opus-5"), CancellationToken.None);
+
+        // Assert
+        using var sent = JsonDocument.Parse(body!);
+        sent.RootElement.TryGetProperty("temperature", out _).Should().BeFalse("an unset temperature is left out, not defaulted");
+        sent.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_WithoutTemperatureOrTopP_SendsNeither()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        string? body = null;
+        handler.When(HttpMethod.Post, "*/v1/messages")
+            .With(req =>
+            {
+                body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("text/event-stream", "data: {\"type\":\"message_stop\"}\n");
+
+        // Act
+        await foreach (var _ in sut.StreamCompleteAsync(TestFactories.SimpleCompletionRequest("claude-sonnet-5"), CancellationToken.None))
+        {
+        }
+
+        // Assert
+        using var sent = JsonDocument.Parse(body!);
+        sent.RootElement.GetProperty("stream").GetBoolean().Should().BeTrue();
+        sent.RootElement.TryGetProperty("temperature", out _).Should().BeFalse("an unset temperature is left out, not defaulted");
+        sent.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_WithATemperature_SendsIt()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        string? body = null;
+        handler.When(HttpMethod.Post, "*/v1/messages")
+            .With(req =>
+            {
+                body = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", """{"id":"x","model":"claude-sonnet-4-6","content":[]}""");
+
+        // Act
+        await sut.CompleteAsync(
+            TestFactories.SimpleCompletionRequest("claude-sonnet-4-6") with { Temperature = 0f },
+            CancellationToken.None);
+
+        // Assert
+        using var sent = JsonDocument.Parse(body!);
+        sent.RootElement.GetProperty("temperature").GetSingle().Should().Be(0f, "a temperature of 0 is a value, not an absence");
+        sent.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+    }
+
     [Fact]
     public async Task CompleteAsync_WithSystemPrompt_EmitsTopLevelSystemBlock()
     {

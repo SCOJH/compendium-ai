@@ -21,7 +21,16 @@ public class CompletionRequestTests
         // Assert
         request.Model.Should().Be("anthropic/claude-3.5-sonnet");
         request.Messages.Should().HaveCount(1);
-        request.Temperature.Should().Be(0.7f); // Default value
+        request.Temperature.Should().BeNull("an unset temperature is left to the adapter, which may send none");
+        request.TopP.Should().BeNull();
+    }
+
+    [Fact]
+    public void FallbackTemperature_IsTheFormerDefault()
+    {
+        // The adapters other than Anthropic send it for an unset temperature: it must stay what the property
+        // defaulted to before it became optional, or their callers' requests change on the wire.
+        CompletionRequest.FallbackTemperature.Should().Be(0.7f);
     }
 
     [Fact]

@@ -13,6 +13,13 @@ namespace Compendium.Abstractions.AI.Models;
 public sealed record CompletionRequest
 {
     /// <summary>
+    /// The temperature every adapter except Anthropic sends when <see cref="Temperature"/> is <see langword="null"/>:
+    /// 0.7, what <see cref="Temperature"/> defaulted to before it became optional, so a caller that never set one
+    /// puts the same request on the wire as before.
+    /// </summary>
+    public const float FallbackTemperature = 0.7f;
+
+    /// <summary>
     /// Gets the model identifier to use for completion.
     /// Examples: "anthropic/claude-3.5-sonnet", "openai/gpt-4o", "meta-llama/llama-3.1-70b-instruct".
     /// </summary>
@@ -29,9 +36,13 @@ public sealed record CompletionRequest
     public string? SystemPrompt { get; init; }
 
     /// <summary>
-    /// Gets the temperature for randomness (0.0 to 2.0). Default is 0.7.
+    /// Gets the temperature for randomness (0.0 to 2.0), or <see langword="null"/> (the default) to leave it unset.
     /// </summary>
-    public float Temperature { get; init; } = 0.7f;
+    /// <remarks>
+    /// Unset, the Anthropic adapter sends no <c>temperature</c> at all: Claude Opus 4.7 and later, Sonnet 5, Fable and
+    /// Mythos answer any sampling parameter with a 400. The other adapters send <see cref="FallbackTemperature"/>.
+    /// </remarks>
+    public float? Temperature { get; init; }
 
     /// <summary>
     /// Gets the maximum number of tokens to generate.
@@ -39,7 +50,8 @@ public sealed record CompletionRequest
     public int? MaxTokens { get; init; }
 
     /// <summary>
-    /// Gets the top-p (nucleus) sampling value.
+    /// Gets the top-p (nucleus) sampling value, or <see langword="null"/> (the default) to leave it unset: no adapter
+    /// then sends one.
     /// </summary>
     public float? TopP { get; init; }
 
