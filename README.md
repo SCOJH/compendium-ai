@@ -51,6 +51,23 @@ dotnet test -c Release --filter "FullyQualifiedName!~IntegrationTests"
 Integration tests (`tests/Integration/*`) require live provider credentials and/or Docker
 (Ollama uses Testcontainers) and are skipped in CI.
 
+## Reasoning channel (next: `v1.1.0-preview.5`, not released)
+
+`CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low…max, `BudgetTokens`, `IncludeReasoning`) asks the model for
+its own reasoning. Unset, every request is the one it was. The reasoning comes back apart from the answer —
+`CompletionChunk.ReasoningDelta` / `CompletionResponse.Reasoning`, only when asked for — and `UsageStats.ReasoningTokens`
+when the provider counts them. Never send it back as a conversation turn.
+
+| Adapter | On the wire |
+|---|---|
+| Anthropic | Opus/Sonnet 4.6+, Fable, Mythos: `thinking: {type: "adaptive", display}` + `output_config.effort` (`xhigh` from Opus 4.7; a budget is refused there, so it is added to `max_tokens` as headroom). Earlier 4.x and Sonnet 3.7: `thinking: {type: "enabled", budget_tokens}` (≥ 1 024), `max_tokens` raised by it. No temperature, no top_p with thinking. Older models: unchanged. `thinking_delta` → `ReasoningDelta`. |
+| OpenAI | `reasoning_effort`, `max_completion_tokens` instead of `max_tokens`, no temperature / top_p / penalties; `reasoning_tokens` → `ReasoningTokens`. |
+| Mistral | `reasoning_effort: "high"`; `thinking` content chunks (a list, where the answer is a string) → `ReasoningDelta` / `Reasoning`. |
+| DeepSeek | `reasoning_content` → `ReasoningDelta` / `Reasoning` (unasked, dropped as before; `InlineReasoningInContent` unchanged). |
+| Others | ignored: the request is sent without it. |
+
+The version is set by the tag (MinVer): this lands as `v1.1.0-preview.5` when that tag is pushed.
+
 ## Releasing
 
 Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 13 packages and publishes to

@@ -38,6 +38,35 @@ internal sealed class AnthropicMessagesRequest
 
     [JsonPropertyName("metadata")]
     public AnthropicRequestMetadata? Metadata { get; set; }
+
+    [JsonPropertyName("thinking")]
+    public AnthropicThinking? Thinking { get; set; }
+
+    [JsonPropertyName("output_config")]
+    public AnthropicOutputConfig? OutputConfig { get; set; }
+}
+
+/// <summary>
+/// Extended thinking: <c>{type: "adaptive", display}</c> on Claude Opus/Sonnet 4.6 and later, Fable and Mythos;
+/// <c>{type: "enabled", budget_tokens}</c> on the models before them (<c>ClaudeReasoning</c>).
+/// </summary>
+internal sealed class AnthropicThinking
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "adaptive";
+
+    [JsonPropertyName("budget_tokens")]
+    public int? BudgetTokens { get; set; }
+
+    [JsonPropertyName("display")]
+    public string? Display { get; set; }
+}
+
+/// <summary><c>output_config</c>: the effort of an adaptive model (<c>low</c> … <c>max</c>).</summary>
+internal sealed class AnthropicOutputConfig
+{
+    [JsonPropertyName("effort")]
+    public string? Effort { get; set; }
 }
 
 /// <summary>A system-prompt block. Anthropic accepts either a single string or an array of blocks.</summary>
@@ -105,7 +134,7 @@ internal sealed class AnthropicMessagesResponse
     public AnthropicUsage? Usage { get; set; }
 }
 
-/// <summary>One content block in a response (text only at this layer).</summary>
+/// <summary>One content block in a response: text, or thinking (its <c>thinking</c> text, empty when omitted).</summary>
 internal sealed class AnthropicContentBlock
 {
     [JsonPropertyName("type")]
@@ -113,6 +142,9 @@ internal sealed class AnthropicContentBlock
 
     [JsonPropertyName("text")]
     public string? Text { get; set; }
+
+    [JsonPropertyName("thinking")]
+    public string? Thinking { get; set; }
 }
 
 /// <summary>Anthropic usage statistics.</summary>
@@ -171,6 +203,10 @@ internal sealed class AnthropicStreamDelta
 
     [JsonPropertyName("text")]
     public string? Text { get; set; }
+
+    /// <summary>The fragment of a <c>thinking_delta</c>.</summary>
+    [JsonPropertyName("thinking")]
+    public string? Thinking { get; set; }
 
     [JsonPropertyName("stop_reason")]
     public string? StopReason { get; set; }

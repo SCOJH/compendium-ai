@@ -48,6 +48,13 @@ internal sealed class MistralChatCompletionRequest
 
     [JsonPropertyName("safe_prompt")]
     public bool? SafePrompt { get; set; }
+
+    /// <summary>
+    /// <c>"high"</c>: the model returns a thinking chunk before its answer (Magistral, and the models that take the
+    /// parameter). Left out, the model's default.
+    /// </summary>
+    [JsonPropertyName("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
 }
 
 /// <summary>
@@ -207,8 +214,12 @@ internal sealed class MistralChatDelta
     [JsonPropertyName("role")]
     public string? Role { get; set; }
 
+    /// <summary>
+    /// A string, or — while a reasoning model thinks, and at the turn from thinking to answering — a list of chunks:
+    /// <c>{type: "thinking", thinking: [{type: "text", text}]}</c> and <c>{type: "text", text}</c>.
+    /// </summary>
     [JsonPropertyName("content")]
-    public string? Content { get; set; }
+    public JsonElement? Content { get; set; }
 
     [JsonPropertyName("tool_calls")]
     public List<MistralToolCall>? ToolCalls { get; set; }

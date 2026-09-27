@@ -66,6 +66,13 @@ public sealed record CompletionRequest
     public float? PresencePenalty { get; init; }
 
     /// <summary>
+    /// Gets the model's own reasoning channel for this request, or <see langword="null"/> (the default) to leave the
+    /// request as it was: see <see cref="ReasoningOptions"/>. With it, the adapters whose provider refuses sampling
+    /// parameters with reasoning (Claude, OpenAI's reasoning models) send no temperature and no top_p.
+    /// </summary>
+    public ReasoningOptions? Reasoning { get; init; }
+
+    /// <summary>
     /// Gets the stop sequences that will halt generation.
     /// </summary>
     public IReadOnlyList<string>? StopSequences { get; init; }
