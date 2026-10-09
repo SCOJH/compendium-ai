@@ -309,6 +309,88 @@ public class GeminiHttpClientTests
     }
 
     [Fact]
+    public async Task ListModelsAsync_ReadsEveryPage()
+    {
+        // Arrange — Google pages the list (50 per page by default): the second page follows nextPageToken.
+        var (client, handler) = TestFactories.CreateHttpClient();
+        handler.Expect(HttpMethod.Get, "*/v1beta/models")
+            .WithExactQueryString($"pageSize=1000&key={TestFactories.DefaultApiKey}")
+            .Respond("application/json", """{"models":[{"name":"models/a"},{"name":"models/b"}],"nextPageToken":"t2"}""");
+        handler.Expect(HttpMethod.Get, "*/v1beta/models")
+            .WithExactQueryString($"pageSize=1000&key={TestFactories.DefaultApiKey}&pageToken=t2")
+            .Respond("application/json", """{"models":[{"name":"models/c"}]}""");
+
+        // Act
+        var result = await client.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Select(m => m.Name).Should().Equal("models/a", "models/b", "models/c");
+        handler.VerifyNoOutstandingExpectation();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ListModelsAsync_WhenTheTokenRepeats_Fails()
+    {
+        // Arrange — every page points at the same next page.
+        var (client, handler) = TestFactories.CreateHttpClient();
+        var request = handler.When(HttpMethod.Get, "*/models*")
+            .Respond("application/json", """{"models":[{"name":"models/a"}],"nextPageToken":"t1"}""");
+
+        // Act
+        var result = await client.ListModelsAsync(CancellationToken.None);
+
+        // Assert — the token repeats on the second page: stop there, with no partial list.
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("pagination did not advance");
+        handler.GetMatchCount(request).Should().Be(2);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ListModelsAsync_StopsAfterMaxPages()
+    {
+        // Arrange — a list whose pages never end, each with a new token.
+        var (client, handler) = TestFactories.CreateHttpClient();
+        var served = 0;
+        var request = handler.When(HttpMethod.Get, "*/models*")
+            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $$"""{"models":[],"nextPageToken":"t{{Interlocked.Increment(ref served)}}"}""",
+                    System.Text.Encoding.UTF8,
+                    "application/json"),
+            });
+
+        // Act
+        var result = await client.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        handler.GetMatchCount(request).Should().Be(GeminiHttpClient.MaxModelPages);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_WhenALaterPageFails_ReturnsItsError()
+    {
+        // Arrange
+        var (client, handler) = TestFactories.CreateHttpClient();
+        handler.Expect(HttpMethod.Get, "*/models*")
+            .Respond("application/json", """{"models":[{"name":"models/a"}],"nextPageToken":"t2"}""");
+        handler.Expect(HttpMethod.Get, "*/models*")
+            .Respond(HttpStatusCode.InternalServerError, "application/json", """{"error":{"code":500,"message":"backend down","status":"INTERNAL"}}""");
+
+        // Act
+        var result = await client.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("backend down");
+    }
+
+    [Fact]
     public async Task ListModelsAsync_OnException_ReturnsProviderError()
     {
         // Arrange
