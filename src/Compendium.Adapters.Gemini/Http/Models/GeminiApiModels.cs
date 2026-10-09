@@ -255,6 +255,10 @@ internal sealed class GeminiModelsResponse
 {
     [JsonPropertyName("models")]
     public List<GeminiModelInfo> Models { get; set; } = new();
+
+    /// <summary>The token of the next page; null or empty on the last page.</summary>
+    [JsonPropertyName("nextPageToken")]
+    public string? NextPageToken { get; set; }
 }
 
 internal sealed class GeminiModelInfo

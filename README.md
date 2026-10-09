@@ -57,6 +57,8 @@ Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 13 pac
 GitHub Packages (primary feed), then to nuget.org (Trusted Publishing, or `NUGET_API_KEY`): with neither
 credential that step fails the run, after the GitHub Packages push.
 
+Record the release in [`CHANGELOG.md`](CHANGELOG.md) before tagging.
+
 ## Provenance
 
 This repo was assembled from 14 source repositories (framework subtree + 12 single-adapter repos +

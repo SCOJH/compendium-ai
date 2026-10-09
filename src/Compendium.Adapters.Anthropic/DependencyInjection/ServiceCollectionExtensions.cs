@@ -64,6 +64,10 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
             client.DefaultRequestHeaders.Add("x-api-key", options.ApiKey);
             client.DefaultRequestHeaders.Add("anthropic-version", options.AnthropicVersion);
+            if (!string.IsNullOrWhiteSpace(options.WorkspaceId))
+            {
+                client.DefaultRequestHeaders.Add(AnthropicHttpClient.WorkspaceHeader, options.WorkspaceId.Trim());
+            }
         })
         .AddStandardResilienceHandler();
 

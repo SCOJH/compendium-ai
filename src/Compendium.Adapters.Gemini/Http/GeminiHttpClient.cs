@@ -20,6 +20,12 @@ namespace Compendium.Adapters.Gemini.Http;
 /// </summary>
 internal sealed class GeminiHttpClient
 {
+    /// <summary>The page size asked of <c>models</c>: the API's maximum (its default is 50).</summary>
+    internal const int ModelsPageSize = 1000;
+
+    /// <summary>A guard on the <c>models</c> pagination, never reached by a sane answer.</summary>
+    internal const int MaxModelPages = 50;
+
     private readonly HttpClient _httpClient;
     private readonly GeminiOptions _options;
     private readonly ILogger<GeminiHttpClient> _logger;
@@ -244,18 +250,51 @@ internal sealed class GeminiHttpClient
         }
     }
 
+    /// <summary>
+    /// GETs every page of <c>models</c> (<c>pageSize</c> = <see cref="ModelsPageSize"/>, then <c>pageToken</c> = the
+    /// previous page's <c>nextPageToken</c>) until the token is empty: by default Google returns 50 models per page.
+    /// A repeated token, or more than <see cref="MaxModelPages"/> pages, is a provider error rather than a loop.
+    /// </summary>
     public async Task<Result<List<GeminiModelInfo>>> ListModelsAsync(
         CancellationToken cancellationToken)
     {
         try
         {
-            var path = $"{_options.ApiVersion}/models?{KeyQuery()}";
-            var response = await _httpClient.GetAsync(path, cancellationToken);
-            var result = await HandleResponseAsync<GeminiModelsResponse>(response, cancellationToken);
+            var models = new List<GeminiModelInfo>();
+            var seenTokens = new HashSet<string>(StringComparer.Ordinal);
+            string? token = null;
 
-            return result.Match(
-                success => Result.Success(success.Models),
-                error => Result.Failure<List<GeminiModelInfo>>(error));
+            for (var page = 1; page <= MaxModelPages; page++)
+            {
+                var path = $"{_options.ApiVersion}/models?pageSize={ModelsPageSize}&{KeyQuery()}";
+                if (token is not null)
+                {
+                    path += $"&pageToken={Uri.EscapeDataString(token)}";
+                }
+
+                var response = await _httpClient.GetAsync(path, cancellationToken);
+                var result = await HandleResponseAsync<GeminiModelsResponse>(response, cancellationToken);
+                if (result.IsFailure)
+                {
+                    return Result.Failure<List<GeminiModelInfo>>(result.Error);
+                }
+
+                models.AddRange(result.Value.Models);
+
+                if (string.IsNullOrEmpty(result.Value.NextPageToken))
+                {
+                    return Result.Success(models);
+                }
+
+                if (!seenTokens.Add(result.Value.NextPageToken))
+                {
+                    return PaginationStalled();
+                }
+
+                token = result.Value.NextPageToken;
+            }
+
+            return PaginationStalled();
         }
         catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -267,6 +306,10 @@ internal sealed class GeminiHttpClient
             return Result.Failure<List<GeminiModelInfo>>(AIErrors.ProviderError(ex.Message));
         }
     }
+
+    private static Result<List<GeminiModelInfo>> PaginationStalled() =>
+        Result.Failure<List<GeminiModelInfo>>(
+            AIErrors.ProviderError("Gemini models pagination did not advance"));
 
     private string BuildModelPath(string model, string action, string? extraQuery = null)
     {

@@ -13,11 +13,23 @@ using Compendium.Adapters.Anthropic.Http.Models;
 namespace Compendium.Adapters.Anthropic.Http;
 
 /// <summary>
-/// Thin typed-HttpClient wrapper around the Anthropic Messages API. Handles
-/// authentication, error mapping, JSON (de)serialisation, and SSE streaming.
+/// Thin typed-HttpClient wrapper around the Anthropic Messages and Models APIs. Handles
+/// authentication, workspace selection, error mapping, JSON (de)serialisation, and SSE streaming.
 /// </summary>
 internal sealed class AnthropicHttpClient
 {
+    /// <summary>The header naming the workspace a request acts in (keys that can act on several workspaces).</summary>
+    internal const string WorkspaceHeader = "anthropic-workspace-id";
+
+    /// <summary>The Models API path.</summary>
+    internal const string ModelsPath = "/v1/models";
+
+    /// <summary>The page size asked of <c>/v1/models</c>: the API's maximum, so one page in practice.</summary>
+    internal const int ModelsPageSize = 1000;
+
+    /// <summary>A guard on the <c>/v1/models</c> pagination, never reached by a sane answer.</summary>
+    internal const int MaxModelPages = 50;
+
     private const string MessagesPath = "/v1/messages";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -61,6 +73,12 @@ internal sealed class AnthropicHttpClient
         if (!_httpClient.DefaultRequestHeaders.Contains("anthropic-version"))
         {
             _httpClient.DefaultRequestHeaders.Add("anthropic-version", _options.AnthropicVersion);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.WorkspaceId)
+            && !_httpClient.DefaultRequestHeaders.Contains(WorkspaceHeader))
+        {
+            _httpClient.DefaultRequestHeaders.Add(WorkspaceHeader, _options.WorkspaceId.Trim());
         }
     }
 
@@ -189,9 +207,94 @@ internal sealed class AnthropicHttpClient
         }
     }
 
+    /// <summary>
+    /// GETs every page of <c>/v1/models</c> (<c>limit</c> = <see cref="ModelsPageSize"/>, then <c>after_id</c> = the
+    /// previous page's <c>last_id</c>) while <c>has_more</c>. A page that does not move the cursor, or more than
+    /// <see cref="MaxModelPages"/> pages, is a provider error rather than a loop.
+    /// </summary>
+    public async Task<Result<List<AnthropicModelInfo>>> ListModelsAsync(CancellationToken cancellationToken)
+    {
+        var models = new List<AnthropicModelInfo>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? cursor = null;
+
+        try
+        {
+            for (var page = 1; page <= MaxModelPages; page++)
+            {
+                var path = cursor is null
+                    ? $"{ModelsPath}?limit={ModelsPageSize}"
+                    : $"{ModelsPath}?limit={ModelsPageSize}&after_id={Uri.EscapeDataString(cursor)}";
+
+                using var response = await _httpClient.GetAsync(path, cancellationToken);
+                var result = await HandleResponseAsync<AnthropicModelsPage>(
+                    response,
+                    cancellationToken,
+                    notFoundIsModel: false);
+
+                if (result.IsFailure)
+                {
+                    return Result.Failure<List<AnthropicModelInfo>>(result.Error);
+                }
+
+                var body = result.Value;
+                foreach (var model in body.Data)
+                {
+                    if (!string.IsNullOrWhiteSpace(model.Id) && seen.Add(model.Id))
+                    {
+                        models.Add(model);
+                    }
+                }
+
+                if (_options.EnableLogging)
+                {
+                    _logger.LogDebug(
+                        "Anthropic models page {Page} ({StatusCode}): {Count} models",
+                        page,
+                        (int)response.StatusCode,
+                        body.Data.Count);
+                }
+
+                if (!body.HasMore)
+                {
+                    return Result.Success(models);
+                }
+
+                if (string.IsNullOrEmpty(body.LastId) || string.Equals(body.LastId, cursor, StringComparison.Ordinal))
+                {
+                    return PaginationStalled();
+                }
+
+                cursor = body.LastId;
+            }
+
+            return PaginationStalled();
+        }
+        catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Anthropic models request timed out");
+            return Result.Failure<List<AnthropicModelInfo>>(
+                AIErrors.Timeout(TimeSpan.FromSeconds(_options.TimeoutSeconds)));
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error listing Anthropic models");
+            return Result.Failure<List<AnthropicModelInfo>>(AIErrors.ProviderError(ex.Message));
+        }
+
+        static Result<List<AnthropicModelInfo>> PaginationStalled() =>
+            Result.Failure<List<AnthropicModelInfo>>(
+                AIErrors.ProviderError("Anthropic /v1/models pagination did not advance"));
+    }
+
     private async Task<Result<T>> HandleResponseAsync<T>(
         HttpResponseMessage response,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool notFoundIsModel = true)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -219,13 +322,19 @@ internal sealed class AnthropicHttpClient
             }
         }
 
-        var error = await ParseErrorAsync(response, cancellationToken);
+        var error = await ParseErrorAsync(response, cancellationToken, notFoundIsModel);
         return Result.Failure<T>(error);
     }
 
+    /// <summary>
+    /// Maps an error response to a Compendium error. <paramref name="notFoundIsModel"/> is false for an endpoint whose
+    /// 404 does not name a model (<c>/v1/models</c>: an unknown workspace): that 404 stays a provider error, message
+    /// and type kept.
+    /// </summary>
     private static async Task<Error> ParseErrorAsync(
         HttpResponseMessage response,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool notFoundIsModel = true)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -250,7 +359,7 @@ internal sealed class AnthropicHttpClient
             HttpStatusCode.Unauthorized => AIErrors.InvalidApiKey(),
             HttpStatusCode.PaymentRequired => AIErrors.InsufficientCredits(),
             HttpStatusCode.TooManyRequests => AIErrors.RateLimitExceeded(),
-            HttpStatusCode.NotFound => AIErrors.ModelNotFound(message),
+            HttpStatusCode.NotFound when notFoundIsModel => AIErrors.ModelNotFound(message),
             _ => AIErrors.ProviderError(message, code),
         };
     }
