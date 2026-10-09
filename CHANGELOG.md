@@ -5,7 +5,7 @@ adapters) are recorded here. The format follows [Keep a Changelog](https://keepa
 follow the `v*` tags. Earlier versions are described in the generated notes of the
 [GitHub Releases](https://github.com/SCOJH/compendium-ai/releases).
 
-## [1.1.0-preview.5] - 2026-10-08
+## [1.1.0-preview.5] - 2026-10-10
 
 ### Added
 
