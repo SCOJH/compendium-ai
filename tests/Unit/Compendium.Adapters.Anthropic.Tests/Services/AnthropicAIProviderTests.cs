@@ -647,22 +647,392 @@ public class AnthropicAIProviderTests
 
     // ---------- ListModelsAsync ----------
 
+    private const string ObservedWorkspaceMessage =
+        "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use";
+
+    private static string ModelsPage(string data, bool hasMore, string? lastId) =>
+        $$"""
+        { "data": [ {{data}} ], "has_more": {{(hasMore ? "true" : "false")}}, "first_id": null, "last_id": {{(lastId is null ? "null" : "\"" + lastId + "\"")}} }
+        """;
+
+    private static string Model(string id) =>
+        $$"""{ "type": "model", "id": "{{id}}", "display_name": "{{id}}", "created_at": "2026-01-01T00:00:00Z" }""";
+
+    private static string ErrorBody(string type, string message) =>
+        JsonSerializer.Serialize(new { type = "error", error = new { type, message } });
+
     [Fact]
-    public async Task ListModelsAsync_ReturnsCuratedCatalog()
+    public async Task ListModelsAsync_ReadsEveryPage()
     {
         // Arrange
-        var (httpClient, _) = TestFactories.CreateHttpClient();
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
         var sut = TestFactories.CreateProvider(httpClient);
+        handler.Expect(HttpMethod.Get, "*/v1/models")
+            .WithExactQueryString("limit=1000")
+            .Respond("application/json", ModelsPage(Model("m1") + "," + Model("m2"), hasMore: true, lastId: "m2"));
+        handler.Expect(HttpMethod.Get, "*/v1/models")
+            .WithExactQueryString("limit=1000&after_id=m2")
+            .Respond("application/json", ModelsPage(Model("m3"), hasMore: false, lastId: "m3"));
 
         // Act
         var result = await sut.ListModelsAsync(CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
-        result.Value.Should().NotBeEmpty();
-        result.Value.Should().OnlyContain(m => m.Provider == "anthropic");
-        result.Value.Select(m => m.Id).Should().Contain("claude-3-7-sonnet-latest");
-        result.Value.Select(m => m.Id).Should().Contain("claude-3-5-haiku-latest");
+        result.Value.Select(m => m.Id).Should().Equal("m1", "m2", "m3");
+        handler.VerifyNoOutstandingExpectation();
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_ListsAnIdSeenOnAnEarlierPageOnce()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.Expect(HttpMethod.Get, "*/v1/models")
+            .WithExactQueryString("limit=1000")
+            .Respond("application/json", ModelsPage(Model("m1") + "," + Model("m2"), hasMore: true, lastId: "m2"));
+        handler.Expect(HttpMethod.Get, "*/v1/models")
+            .WithExactQueryString("limit=1000&after_id=m2")
+            .Respond("application/json", ModelsPage(Model("m2") + "," + Model("m3"), hasMore: false, lastId: "m3"));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Select(m => m.Id).Should().Equal("m1", "m2", "m3");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_MapsDisplayNameDateAndLimits()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*").Respond("application/json", """
+        {
+          "data": [
+            {
+              "type": "model",
+              "id": "claude-sonnet-4-5-20250929",
+              "display_name": "Claude Sonnet 4.5",
+              "created_at": "2025-09-29T02:00:00+02:00",
+              "max_input_tokens": 200000,
+              "max_tokens": 64000,
+              "line": "sonnet",
+              "capabilities": { "image_input": { "supported": true }, "thinking": { "supported": true } }
+            }
+          ],
+          "has_more": false,
+          "first_id": "claude-sonnet-4-5-20250929",
+          "last_id": "claude-sonnet-4-5-20250929"
+        }
+        """);
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var model = result.Value.Should().ContainSingle().Subject;
+        model.Id.Should().Be("claude-sonnet-4-5-20250929");
+        model.Name.Should().Be("Claude Sonnet 4.5");
+        model.Provider.Should().Be("anthropic");
+        model.ContextWindow.Should().Be(200_000);
+        model.MaxOutputTokens.Should().Be(64_000);
+        model.SupportsVision.Should().BeTrue();
+        model.SupportsStreaming.Should().BeTrue();
+        model.SupportsTools.Should().BeTrue();
+        model.SupportsEmbeddings.Should().BeFalse();
+        model.PricingInputPerMillion.Should().BeNull();
+        model.PricingOutputPerMillion.Should().BeNull();
+        var createdAt = model.Metadata!["created_at"].Should().BeOfType<DateTimeOffset>().Subject;
+        createdAt.Should().Be(new DateTimeOffset(2025, 9, 29, 0, 0, 0, TimeSpan.Zero));
+        createdAt.Offset.Should().Be(TimeSpan.Zero);
+        model.Metadata["line"].Should().Be("sonnet");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_TreatsAnEpochReleaseDateAsUnknown()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*").Respond("application/json", """
+        { "data": [ { "type": "model", "id": "claude-x", "display_name": "Claude X", "created_at": "1970-01-01T00:00:00Z", "line": "opus" } ], "has_more": false }
+        """);
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var model = result.Value.Should().ContainSingle().Subject;
+        model.Metadata.Should().NotBeNull();
+        model.Metadata!.ContainsKey("created_at").Should().BeFalse();
+        model.Metadata["line"].Should().Be("opus");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_WithoutLimits_LeavesThemUnknown()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*").Respond("application/json", """
+        { "data": [ { "type": "model", "id": "claude-y", "max_input_tokens": null, "max_tokens": null, "capabilities": null } ], "has_more": false }
+        """);
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        var model = result.Value.Should().ContainSingle().Subject;
+        model.Name.Should().Be("claude-y");
+        model.ContextWindow.Should().BeNull();
+        model.MaxOutputTokens.Should().BeNull();
+        model.SupportsVision.Should().BeFalse();
+        model.Metadata.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_OnWorkspaceError_ReturnsTheProviderErrorAsIs()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond(HttpStatusCode.BadRequest, "application/json", ErrorBody("invalid_request_error", ObservedWorkspaceMessage));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("anthropic-workspace-id");
+        result.Error.Message.Should().Contain(ObservedWorkspaceMessage);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_On404_IsAProviderError_NotAModelNotFound()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient(o => o.WorkspaceId = "wrkspc_x");
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond(HttpStatusCode.NotFound, "application/json", ErrorBody("not_found_error", "Workspace `wrkspc_x` not found."));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("[not_found_error]");
+        result.Error.Message.Should().Contain("Workspace `wrkspc_x` not found.");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_On401_IsInvalidApiKey()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond(HttpStatusCode.Unauthorized, "application/json", ErrorBody("authentication_error", "invalid x-api-key"));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.InvalidApiKey");
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ListModelsAsync_WhenTheCursorDoesNotMove_FailsInsteadOfLooping()
+    {
+        // Arrange — every page claims more after the same id.
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var request = handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond("application/json", ModelsPage(Model("m1"), hasMore: true, lastId: "m1"));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert — the second page does not move the cursor: stop there, with no partial list.
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("pagination did not advance");
+        handler.GetMatchCount(request).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_WhenAPageHasMoreWithoutALastId_Fails()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var request = handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond("application/json", ModelsPage(Model("m1"), hasMore: true, lastId: null));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Message.Should().Contain("pagination did not advance");
+        handler.GetMatchCount(request).Should().Be(1);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ListModelsAsync_StopsAfterMaxPages()
+    {
+        // Arrange — a provider whose pages never end, each moving the cursor.
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var served = 0;
+        var request = handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond(_ =>
+            {
+                var id = $"m{Interlocked.Increment(ref served)}";
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(ModelsPage(Model(id), hasMore: true, lastId: id), Encoding.UTF8, "application/json"),
+                };
+            });
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        handler.GetMatchCount(request).Should().Be(AnthropicHttpClient.MaxModelPages);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_WhenCallerCancels_Rethrows()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        handler.When(HttpMethod.Get, "*/v1/models*").Throw(new TaskCanceledException("cancelled"));
+
+        // Act
+        var act = async () => await sut.ListModelsAsync(cts.Token);
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_OnClientTimeout_IsATimeout()
+    {
+        // Arrange — a TaskCanceledException the caller did not ask for is the HttpClient timeout.
+        var (httpClient, handler) = TestFactories.CreateHttpClient(o => o.TimeoutSeconds = 9);
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*").Throw(new TaskCanceledException("timeout"));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.Timeout");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_OnHttpRequestException_IsAProviderError()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Get, "*/v1/models*").Throw(new HttpRequestException("connection refused"));
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ProviderError");
+        result.Error.Message.Should().Contain("connection refused");
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_WhenLoggingEnabled_LogsThePageWithoutHeaders()
+    {
+        // Arrange
+        var handler = new MockHttpMessageHandler();
+        handler.When(HttpMethod.Get, "*/v1/models*")
+            .Respond("application/json", ModelsPage(Model("m1"), hasMore: false, lastId: "m1"));
+        var options = TestFactories.DefaultOptions(o =>
+        {
+            o.EnableLogging = true;
+            o.WorkspaceId = TestFactories.WorkspaceId;
+        });
+        var logger = new TestFactories.RecordingLogger<AnthropicHttpClient>();
+        var client = new AnthropicHttpClient(
+            new HttpClient(handler) { BaseAddress = new Uri(options.BaseUrl) },
+            Options.Create(options),
+            logger);
+        var sut = TestFactories.CreateProvider(client);
+
+        // Act
+        var result = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        logger.Entries.Should().Contain(e => e.Message.Contains("Anthropic models page 1"));
+        logger.Entries.Should().NotContain(e => e.Message.Contains(TestFactories.DefaultApiKey));
+    }
+
+    [Fact]
+    public async Task EveryRequest_CarriesTheWorkspaceHeader()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient(o => o.WorkspaceId = TestFactories.WorkspaceId);
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.Expect(HttpMethod.Post, "*/v1/messages")
+            .WithHeaders("anthropic-workspace-id", TestFactories.WorkspaceId)
+            .Respond("application/json", """
+            { "id":"x","model":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1} }
+            """);
+        handler.Expect(HttpMethod.Get, "*/v1/models*")
+            .WithHeaders("anthropic-workspace-id", TestFactories.WorkspaceId)
+            .Respond("application/json", ModelsPage(Model("m1"), hasMore: false, lastId: "m1"));
+
+        // Act
+        var completion = await sut.CompleteAsync(TestFactories.SimpleCompletionRequest(), CancellationToken.None);
+        var models = await sut.ListModelsAsync(CancellationToken.None);
+
+        // Assert
+        completion.IsSuccess.Should().BeTrue();
+        models.IsSuccess.Should().BeTrue();
+        handler.VerifyNoOutstandingExpectation();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_On404_StillMapsToModelNotFound()
+    {
+        // Arrange
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        handler.When(HttpMethod.Post, "*/v1/messages")
+            .Respond(HttpStatusCode.NotFound, "application/json", ErrorBody("not_found_error", "model: claude-nope"));
+
+        // Act
+        var result = await sut.CompleteAsync(TestFactories.SimpleCompletionRequest("claude-nope"), CancellationToken.None);
+
+        // Assert
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.ModelNotFound");
     }
 
     // ---------- HealthCheckAsync ----------

@@ -47,6 +47,7 @@ A runnable end-to-end demo (sync + streaming, prompt caching enabled) lives in [
 | `ApiKey` | _(required)_ | Sent as the `x-api-key` header. Read from a secret store — **never** hard-code. |
 | `BaseUrl` | `https://api.anthropic.com` | Override only for proxies or contract tests. |
 | `AnthropicVersion` | `2023-06-01` | Sent as the `anthropic-version` header. Bump when consuming newer beta features. |
+| `WorkspaceId` | _(none)_ | Sent as `anthropic-workspace-id` on every request when set. Required for a key that can act on several workspaces; leave empty for a single-workspace key (if sent, it must match). Console › Settings › Workspaces, ID column. |
 | `DefaultModel` | `claude-3-7-sonnet-latest` | Used when `CompletionRequest.Model` is null/empty. |
 | `DefaultMaxTokens` | `4096` | Anthropic requires `max_tokens` on every request — the adapter always sends one. |
 | `TimeoutSeconds` | `120` | Wraps the typed HttpClient timeout. |
@@ -64,6 +65,26 @@ Bind from configuration under the `Anthropic` section:
   }
 }
 ```
+
+## Multi-workspace keys
+
+A key that belongs to one workspace always acts in it: leave `WorkspaceId` empty. A key that can act on several
+workspaces (a personal or service-account key not scoped to one workspace) must name the workspace of each request;
+Anthropic answers `400 invalid_request_error` without it. Set `WorkspaceId` and the adapter sends it as the
+`anthropic-workspace-id` header on every request, Messages and Models alike:
+
+```json
+{
+  "Anthropic": {
+    "ApiKey": "sk-ant-...",
+    "WorkspaceId": "wrkspc_..."
+  }
+}
+```
+
+The id starts with `wrkspc_`; it is the **ID** column of Settings › Workspaces in the Claude Console. The adapter does
+not check its format: Anthropic does (`400` for a malformed id, `404` for a workspace the key cannot reach). See
+[Select a workspace](https://platform.claude.com/docs/en/manage-claude/authentication#select-a-workspace).
 
 ## Prompt caching (preview)
 
@@ -85,7 +106,8 @@ Models that currently support prompt caching include the Claude 3.5/3.7/4.x Sonn
 | Typed error mapping (auth / rate / payment / model-not-found / 5xx) | ✅ |
 | Cancellation tokens honoured end-to-end | ✅ |
 | Prompt caching markers (opt-in) | ✅ |
-| Curated model catalog (`ListModelsAsync`) | ✅ (static; Anthropic's public `/v1/models` is not yet covered) |
+| Model catalog (`ListModelsAsync`) | ✅ — live `GET /v1/models`, every page; `Metadata["created_at"]` (DateTimeOffset, UTC) and `Metadata["line"]`; errors returned as-is (a 404 of `/v1/models`, such as an unknown workspace, is `AI.ProviderError`) |
+| Workspace selection (`WorkspaceId`) | ✅ (`anthropic-workspace-id` on every request) |
 | Health check (`HealthCheckAsync`) | ✅ (1-token probe against the default model) |
 | Embeddings (`EmbedAsync`) | ❌ — Anthropic does not expose embeddings; the adapter returns `AI.InvalidRequest` so callers can fall back to a dedicated provider. |
 

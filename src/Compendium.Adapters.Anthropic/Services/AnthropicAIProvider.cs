@@ -30,10 +30,7 @@ namespace Compendium.Adapters.Anthropic.Services;
 /// does not expose a public embeddings endpoint.
 /// </para>
 /// <para>
-/// <see cref="ListModelsAsync"/> returns the curated list known at adapter ship
-/// time. Anthropic's <c>/v1/models</c> endpoint is not part of the public surface
-/// covered by this preview; users can override per-request via
-/// <see cref="CompletionRequest.Model"/>.
+/// <see cref="ListModelsAsync"/> reads <c>GET /v1/models</c>, every page, and returns the provider's error as it is.
 /// </para>
 /// </remarks>
 internal sealed class AnthropicAIProvider : IAIProvider
@@ -184,10 +181,16 @@ internal sealed class AnthropicAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
-    public Task<Result<IReadOnlyList<AIModel>>> ListModelsAsync(
+    public async Task<Result<IReadOnlyList<AIModel>>> ListModelsAsync(
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(Result.Success(AnthropicModelCatalog.KnownModels));
+        _logger.LogDebug("Listing Anthropic models");
+        var result = await _httpClient.ListModelsAsync(cancellationToken);
+
+        // The provider's answer as it is: no fallback onto a static list, which would show models a key cannot call.
+        return result.Match(
+            models => Result.Success<IReadOnlyList<AIModel>>(models.Select(MapToAIModel).ToList()),
+            error => Result.Failure<IReadOnlyList<AIModel>>(error));
     }
 
     /// <inheritdoc />
@@ -347,6 +350,41 @@ internal sealed class AnthropicAIProvider : IAIProvider
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Maps a <c>ModelInfo</c> of <c>/v1/models</c>. The API gives no price; an unknown limit stays null; the release
+    /// date goes to <c>Metadata["created_at"]</c> (a UTC <see cref="DateTimeOffset"/>), left out when the API sends the
+    /// epoch for an unknown date.
+    /// </summary>
+    private static AIModel MapToAIModel(AnthropicModelInfo info)
+    {
+        var metadata = new Dictionary<string, object>(StringComparer.Ordinal);
+        if (info.CreatedAt is { } createdAt && createdAt > DateTimeOffset.UnixEpoch)
+        {
+            metadata["created_at"] = createdAt.ToUniversalTime();
+        }
+
+        if (!string.IsNullOrEmpty(info.Line))
+        {
+            metadata["line"] = info.Line;
+        }
+
+        return new AIModel
+        {
+            Id = info.Id,
+            Name = string.IsNullOrWhiteSpace(info.DisplayName) ? info.Id : info.DisplayName,
+            Provider = "anthropic",
+            ContextWindow = info.MaxInputTokens is > 0 ? info.MaxInputTokens : null,
+            MaxOutputTokens = info.MaxTokens is > 0 ? info.MaxTokens : null,
+            SupportsStreaming = true,
+            SupportsTools = true,
+            SupportsEmbeddings = false,
+            SupportsVision = info.Capabilities?.ImageInput?.Supported ?? false,
+            PricingInputPerMillion = null,
+            PricingOutputPerMillion = null,
+            Metadata = metadata.Count == 0 ? null : metadata,
+        };
     }
 
     private static FinishReason MapStopReason(string? reason) => reason switch

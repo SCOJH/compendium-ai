@@ -198,3 +198,61 @@ internal sealed class AnthropicError
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
 }
+
+/// <summary>One page of <c>GET /v1/models</c>.</summary>
+internal sealed class AnthropicModelsPage
+{
+    [JsonPropertyName("data")]
+    public List<AnthropicModelInfo> Data { get; set; } = new();
+
+    [JsonPropertyName("has_more")]
+    public bool HasMore { get; set; }
+
+    [JsonPropertyName("first_id")]
+    public string? FirstId { get; set; }
+
+    [JsonPropertyName("last_id")]
+    public string? LastId { get; set; }
+}
+
+/// <summary>A <c>ModelInfo</c> of <c>GET /v1/models</c>; fields the adapter does not map are left out.</summary>
+internal sealed class AnthropicModelInfo
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("display_name")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    [JsonPropertyName("max_input_tokens")]
+    public int? MaxInputTokens { get; set; }
+
+    [JsonPropertyName("max_tokens")]
+    public int? MaxTokens { get; set; }
+
+    [JsonPropertyName("line")]
+    public string? Line { get; set; }
+
+    [JsonPropertyName("capabilities")]
+    public AnthropicModelCapabilities? Capabilities { get; set; }
+}
+
+/// <summary>The <c>capabilities</c> of a <c>ModelInfo</c>; only what the adapter maps.</summary>
+internal sealed class AnthropicModelCapabilities
+{
+    [JsonPropertyName("image_input")]
+    public AnthropicCapabilitySupport? ImageInput { get; set; }
+}
+
+/// <summary>A capability flag of a <c>ModelInfo</c>: <c>{ "supported": true }</c>.</summary>
+internal sealed class AnthropicCapabilitySupport
+{
+    [JsonPropertyName("supported")]
+    public bool Supported { get; set; }
+}

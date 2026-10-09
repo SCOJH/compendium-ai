@@ -16,6 +16,9 @@ internal static class TestFactories
     public const string DefaultBaseUrl = "https://api.anthropic.com";
     public const string DefaultApiKey = "sk-ant-test-key";
 
+    /// <summary>The example workspace id of Anthropic's documentation.</summary>
+    public const string WorkspaceId = "wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ";
+
     public static AnthropicOptions DefaultOptions(Action<AnthropicOptions>? configure = null)
     {
         var options = new AnthropicOptions
