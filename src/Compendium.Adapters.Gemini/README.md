@@ -4,7 +4,7 @@ Direct adapter for the **Google Gemini REST API** (`https://generativelanguage.g
 
 | What | Value |
 |---|---|
-| Target framework | net9.0 |
+| Target framework | net9.0;net10.0 |
 | Abstractions pin | `Compendium.Abstractions.AI` 1.0.1 |
 | HTTP stack | Typed `HttpClient` + `Microsoft.Extensions.Http.Resilience` (standard pipeline) + `System.Text.Json` |
 | Auth | `?key=<ApiKey>` query parameter on every request |

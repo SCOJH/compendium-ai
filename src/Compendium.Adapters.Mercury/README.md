@@ -116,7 +116,7 @@ Diffusion LLMs generate tokens in parallel rather than strictly left-to-right. T
 
 | Aspect | Choice |
 |---|---|
-| Target | .NET 9, C# 13 |
+| Target | .NET 9 and .NET 10 (`net9.0;net10.0`), C# 13 |
 | Test framework | xUnit 2.9.3 + FluentAssertions 6.12.1 + NSubstitute 5.1.0 |
 | Coverage | **99.4 %** line / 93.1 % branch (71 tests) — gate at 90 % |
 | HTTP mocking | `RichardSzalay.MockHttp` 7.0.0 |

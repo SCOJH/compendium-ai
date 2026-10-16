@@ -4,7 +4,8 @@
   </PropertyGroup>
 
   <!-- Compendium framework — consumed as published NuGets (nuget.org).
-       Compendium.Abstractions.AI is NOT pinned here: it lives in this repo (src/Compendium.Abstractions.AI). -->
+       Compendium.Abstractions.AI is NOT pinned here: it lives in this repo (src/Compendium.Abstractions.AI).
+       NET10-01: these versions ship lib/net9.0 only; the net10.0 target consumes that asset. -->
   <ItemGroup>
     <PackageVersion Include="Compendium.Core" Version="1.0.5-preview.5" />
     <PackageVersion Include="Compendium.Abstractions" Version="1.0.5-preview.5" />
@@ -15,20 +16,15 @@
     <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
-  <!-- Production runtime (union of the 12 source adapter repos; conflicts resolved highest-wins) -->
+  <!-- Production runtime — the packages that are not versioned with the .NET runtime
+       (union of the 12 source adapter repos; conflicts resolved highest-wins). -->
   <ItemGroup>
     <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.16" />
+    <!-- dotnet/extensions, not the runtime: one version for both targets. Its net9.0 and
+         net10.0 dependency groups each ask for the Microsoft.Extensions.* line of their
+         runtime, which the two conditioned ItemGroups below provide. -->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.16" />
-    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.16" />
-    <PackageVersion Include="System.Text.Json" Version="10.0.8" />
   </ItemGroup>
 
   <!-- Test stack -->
@@ -45,14 +41,53 @@
     <PackageVersion Include="Bogus" Version="35.6.5" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="RichardSzalay.MockHttp" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.8" />
   </ItemGroup>
 
   <!-- Container fixtures for integration tests -->
   <ItemGroup>
     <PackageVersion Include="Testcontainers" Version="4.15.0" />
+  </ItemGroup>
+
+  <!-- NET10-01: one line per target for the Microsoft.Extensions.* family, which is
+       versioned with the runtime (the same layout as SCOJH/Compendium#178).
+
+       net9.0 takes the 9.0.x line of its runtime and of the Compendium core packages
+       (Compendium.Abstractions 1.0.5-preview.5 asks for 9.0.19). Before NET10-01 the
+       single, unconditioned line was a highest-wins mix — 10.0.12 for Configuration,
+       Configuration.Abstractions, Configuration.Binder, DependencyInjection,
+       DependencyInjection.Abstractions, Logging.Abstractions and Options, 10.0.8 for
+       Logging, 9.0.16 for Http, Options.ConfigurationExtensions and Options.DataAnnotations —
+       that pulled every .NET 9 consumer onto the .NET 10 packages; the floor now goes down
+       to 9.0.20, which no consumer has to act on. net10.0 cannot share a 9.0.x line: packages built for .NET 10 ask for
+       Microsoft.Extensions.* >= 10.0.0 in their net10.0 group, and a central 9.0.x pin
+       would be a package downgrade (NU1605, an error here). Dependabot updates each line
+       on its own; its semver-major ignore (.github/dependabot.yml) keeps the net9.0 line
+       on 9.x. System.Text.Json is not pinned any more: both runtimes ship it, and the
+       .NET 10 SDK flags a PackageReference to it as redundant (NU1510). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.20" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.13" />
   </ItemGroup>
 </Project>
