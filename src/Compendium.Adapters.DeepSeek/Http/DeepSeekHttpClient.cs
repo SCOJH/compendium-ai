@@ -124,10 +124,9 @@ internal sealed class DeepSeekHttpClient
             stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);
 
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested
+                   && await reader.ReadLineAsync(cancellationToken) is { } line)
             {
-                var line = await reader.ReadLineAsync(cancellationToken);
-
                 if (string.IsNullOrEmpty(line))
                 {
                     continue;

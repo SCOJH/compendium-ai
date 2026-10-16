@@ -23,7 +23,7 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="System.Text.Json" />
+    <!-- System.Text.Json comes from the shared framework on both targets (NU1510 on the .NET 10 SDK). -->
   </ItemGroup>
 
   <ItemGroup>

@@ -133,9 +133,9 @@ internal sealed class OllamaHttpClient
             stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);
 
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested
+                   && await reader.ReadLineAsync(cancellationToken) is { } line)
             {
-                var line = await reader.ReadLineAsync(cancellationToken);
                 if (string.IsNullOrWhiteSpace(line))
                 {
                     continue;
@@ -279,9 +279,9 @@ internal sealed class OllamaHttpClient
             using var reader = new StreamReader(stream);
 
             string? lastStatus = null;
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested
+                   && await reader.ReadLineAsync(cancellationToken) is { } line)
             {
-                var line = await reader.ReadLineAsync(cancellationToken);
                 if (string.IsNullOrWhiteSpace(line))
                 {
                     continue;

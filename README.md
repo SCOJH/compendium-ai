@@ -42,6 +42,10 @@ tests/Integration/*                 # integration tests (network/Docker-gated, e
 
 ## Build & test
 
+Every package targets `net9.0` and `net10.0` (NET10-01; `net9.0` stays until .NET 9 leaves support on
+2026-11-10). Building needs the .NET 10 SDK (`global.json`); running the `net9.0` half of the tests also
+needs the .NET 9 runtime, which the .NET 9 SDK brings — the CI installs both.
+
 ```bash
 dotnet restore
 dotnet build -c Release

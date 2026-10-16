@@ -127,7 +127,7 @@ Hand-rolled `HttpClient` + `System.Text.Json`, mirroring [`compendium-adapter-op
 
 | Aspect | Choice |
 |---|---|
-| Target | .NET 9, C# 13 |
+| Target | .NET 9 and .NET 10 (`net9.0;net10.0`), C# 13 |
 | Test framework | xUnit 2.9.3 + FluentAssertions 6.12.1 + NSubstitute 5.1.0 |
 | HTTP mocking | `RichardSzalay.MockHttp` 7.0.0 |
 | Result pattern | `Result<T>` from `Compendium.Core` |
