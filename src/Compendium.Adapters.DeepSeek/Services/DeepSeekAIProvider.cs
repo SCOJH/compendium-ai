@@ -56,7 +56,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         var apiRequest = MapToApiRequest(request, model, stream: false);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
-            r => Result.Success(MapToCompletionResponse(r)),
+            r => Result.Success(MapToCompletionResponse(r, request.Reasoning is { IncludeReasoning: true })),
             error => Result.Failure<CompletionResponse>(error));
     }
 
@@ -80,11 +80,11 @@ internal sealed class DeepSeekAIProvider : IAIProvider
                 yield break;
             }
 
-            var mapped = MapToCompletionChunk(chunk.Value, index);
+            var mapped = MapToCompletionChunk(chunk.Value, index, request.Reasoning is { IncludeReasoning: true });
             if (mapped is null)
             {
-                // Pure reasoning delta with no visible content, and the consumer did not opt in
-                // to inline reasoning — skip silently. Final completion still arrives via the
+                // Pure reasoning delta with no visible content, and the consumer asked neither for the reasoning
+                // (ReasoningOptions) nor to inline it — skip silently. Final completion still arrives via the
                 // chunk carrying finish_reason.
                 continue;
             }
@@ -227,7 +227,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         }
     }
 
-    private CompletionResponse MapToCompletionResponse(DeepSeekChatCompletionResponse apiResponse)
+    private CompletionResponse MapToCompletionResponse(DeepSeekChatCompletionResponse apiResponse, bool surfaceReasoning)
     {
         var choice = apiResponse.Choices.FirstOrDefault();
         var message = choice?.Message;
@@ -260,6 +260,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
             Id = apiResponse.Id,
             Model = apiResponse.Model,
             Content = content,
+            Reasoning = surfaceReasoning && !string.IsNullOrEmpty(reasoning) ? reasoning : null,
             FinishReason = MapFinishReason(choice?.FinishReason),
             Usage = new UsageStats
             {
@@ -283,7 +284,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
             Latency: TimeSpan.Zero);
     }
 
-    private CompletionChunk? MapToCompletionChunk(DeepSeekStreamChunk chunk, int index)
+    private CompletionChunk? MapToCompletionChunk(DeepSeekStreamChunk chunk, int index, bool surfaceReasoning)
     {
         var choice = chunk.Choices.FirstOrDefault();
         var isFinal = choice?.FinishReason != null;
@@ -293,12 +294,12 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         var hasContent = !string.IsNullOrEmpty(content);
         var hasReasoning = !string.IsNullOrEmpty(reasoning);
 
-        // CompletionChunk has no Metadata side channel in 1.0.1, so reasoning either inlines
-        // into ContentDelta (opt-in) or is dropped from the stream. Always emit the final chunk
-        // even if its delta is empty so consumers see IsFinal=true.
+        // Asked for (ReasoningOptions), the reasoning comes apart from the answer, as ReasoningDelta; InlineReasoningInContent
+        // still inlines it, tagged, into ContentDelta for the consumers that chose that. Otherwise a pure reasoning delta is
+        // dropped, as before. Always emit the final chunk even if its delta is empty so consumers see IsFinal=true.
         if (!hasContent && !isFinal)
         {
-            if (!hasReasoning || !_options.InlineReasoningInContent)
+            if (!hasReasoning || !(surfaceReasoning || _options.InlineReasoningInContent))
             {
                 return null;
             }
@@ -315,6 +316,7 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         {
             Id = chunk.Id,
             ContentDelta = delta,
+            ReasoningDelta = hasReasoning && surfaceReasoning ? reasoning : null,
             Index = index,
             IsFinal = isFinal,
             FinishReason = isFinal ? MapFinishReason(choice?.FinishReason) : null,
