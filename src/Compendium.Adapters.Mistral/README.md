@@ -72,6 +72,21 @@ The standard resilience pipeline (`AddStandardResilienceHandler`) is applied aut
 | `codestral-latest` | Code-specialised (chat endpoint, same wire format) |
 | `pixtral-12b-latest`, `pixtral-large-latest` | Vision (multimodal text + image) |
 | `mistral-embed` | Embeddings (1024-dim) |
+| `zai-glm-5-3` (`zai-glm-5`, `zai-glm-latest`) | GLM 5.3, Z.ai's open-weight model hosted by Mistral — always reasons; see below |
+
+### GLM (`zai-glm-*`)
+
+The GLM models Mistral hosts go through the GLM dialect (`Compendium.Adapters.ZAi.Glm`, shared with the Z.ai and
+OpenRouter adapters — [`docs/adr/0001-glm-dialect.md`](../../docs/adr/0001-glm-dialect.md)):
+
+- their content is always a list of `thinking` and `text` chunks, in a stream too: the thinking goes to
+  `ReasoningDelta` / `Reasoning` when `CompletionRequest.Reasoning` asks for it, never into the answer;
+- `reasoning_effort` is `low`, `high` or `max` (from `ReasoningOptions.Effort`; none when no effort is asked), and no
+  `thinking` field is sent (Mistral has none);
+- `max_tokens` gets room for the reasoning on top of the answer's, with or without `Reasoning`: GLM 5.3 reasons anyway;
+- `ListModelsAsync` fills their context window (1M), output limit (128K) and `Metadata["reasoning"] = "always"`.
+
+Every other model is sent and read exactly as before.
 
 ## Usage
 

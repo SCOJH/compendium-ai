@@ -16,6 +16,16 @@ services.AddOpenRouter(builder.Configuration.GetSection("OpenRouter"));
 
 See [`docs/README.md`](docs/README.md) for full configuration, model routing, fallback behaviour, and cost optimisation.
 
+## GLM models (`z-ai/glm-*`)
+
+The GLM models go through the GLM dialect (`Compendium.Adapters.ZAi.Glm`, shared with the Z.ai and Mistral adapters —
+[`docs/adr/0001-glm-dialect.md`](../../docs/adr/0001-glm-dialect.md)): with `CompletionRequest.Reasoning`,
+`reasoning: {effort, exclude}` (`low` / `high` / `max`; never `effort: "none"`, GLM 5.3's reasoning is mandatory);
+`max_tokens` with room for the reasoning, with or without it; `reasoning` / `reasoning_details` read into
+`ReasoningDelta` / `Reasoning` when asked for, never into the answer; `reasoning_tokens` into `UsageStats.ReasoningTokens`;
+and the usage frame OpenRouter sends after the last content chunk read into the final chunk. Every other model is sent
+and read exactly as before.
+
 ## Versioning
 
 This package continues the version sequence of `Compendium.Adapters.OpenRouter` originally published from the framework monorepo (last framework-published version: `1.0.0-preview.8`). The first release from this repo is `v1.0.0-preview.9`. Versions are driven by git tags via [MinVer](https://github.com/adamralph/minver) — see [`docs/RELEASE.md`](docs/RELEASE.md).
