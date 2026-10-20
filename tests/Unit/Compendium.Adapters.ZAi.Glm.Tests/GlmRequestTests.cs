@@ -10,8 +10,11 @@ namespace Compendium.Adapters.ZAi.Glm.Tests;
 /// <summary>
 /// How a request to a GLM is shaped. The effort scale is Z.ai's (https://docs.z.ai/guides/capabilities/thinking.md, read
 /// 2026-10-20: GLM 5.3 takes low / high / max only, "any other input will result in an error"; the compatibility mapping
-/// brings low to low, medium and high to high, xhigh and max to max). The reasoning counts against max_tokens
-/// (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, same date), hence the room added for it.
+/// brings low to low, medium and high to high, xhigh and max to max). GLM 5.2 has no low: Z.ai maps "low/medium" to
+/// high and xhigh to max (same page), and OpenRouter's public catalog (GET https://openrouter.ai/api/v1/models, same
+/// date) lists only xhigh / high / none for z-ai/glm-5.2, so 5.2 gets high or xhigh. The reasoning counts against
+/// max_tokens (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, same date), hence the room added for
+/// it.
 /// </summary>
 public class GlmRequestTests
 {
@@ -29,7 +32,19 @@ public class GlmRequestTests
     public void TheEffort_IsBroughtOntoGlmsScale(ReasoningEffort effort, string expected)
     {
         GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, "high")]
+    [InlineData(ReasoningEffort.Medium, "high")]
+    [InlineData(ReasoningEffort.High, "high")]
+    [InlineData(ReasoningEffort.XHigh, "xhigh")]
+    [InlineData(ReasoningEffort.Max, "xhigh")]
+    public void Glm52_GetsOnlyTheEffortsEveryHostTakes_HighOrXHigh(ReasoningEffort effort, string expected)
+    {
         GlmDialect.EffortFor(Glm52, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+        GlmDialect.EffortFor(GlmDialect.Recognise("z-ai/glm-5.2")!, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+        GlmDialect.EffortFor(GlmDialect.Recognise("zai-glm-5-2")!, new ReasoningOptions { Effort = effort }).Should().Be(expected);
     }
 
     [Fact]
@@ -42,7 +57,10 @@ public class GlmRequestTests
         foreach (var effort in Enum.GetValues<ReasoningEffort>())
         {
             GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = effort }).Should().BeOneOf("low", "high", "max");
+            GlmDialect.EffortFor(Glm52, new ReasoningOptions { Effort = effort }).Should().BeOneOf("high", "xhigh");
         }
+
+        GlmDialect.EffortFor(Glm52, new ReasoningOptions { Effort = (ReasoningEffort)42 }).Should().BeNull();
     }
 
     [Fact]
@@ -61,6 +79,18 @@ public class GlmRequestTests
     public void TheRoomForTheReasoning_FollowsTheEffortSent(ReasoningEffort effort, int expected)
     {
         GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.Medium, GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.High, GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.XHigh, GlmDialect.MaxEffortHeadroom)]
+    [InlineData(ReasoningEffort.Max, GlmDialect.MaxEffortHeadroom)]
+    public void Glm52_TheRoomFollowsTheEffortItRunsAt_NotTheOneAsked(ReasoningEffort effort, int expected)
+    {
+        // Z.ai runs GLM 5.2's low at high, and xhigh at max: a low-effort room would leave a short answer at `length`.
+        GlmDialect.ReasoningHeadroom(Glm52, new ReasoningOptions { Effort = effort }).Should().Be(expected);
     }
 
     [Fact]

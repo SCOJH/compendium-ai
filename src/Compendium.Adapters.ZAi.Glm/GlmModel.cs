@@ -50,7 +50,8 @@ public sealed record GlmModel
 
     /// <summary>
     /// Whether the model takes a reasoning effort: GLM 5.2 and later, on the <c>low</c> · <c>high</c> · <c>max</c> scale
-    /// (<see cref="GlmDialect.EffortFor"/>). The earlier versions decide alone how much they reason.
+    /// from 5.3 on and <c>high</c> · <c>xhigh</c> for 5.2 (<see cref="GlmDialect.EffortFor"/>). The earlier versions
+    /// decide alone how much they reason.
     /// </summary>
     public bool TakesReasoningEffort { get; init; }
 

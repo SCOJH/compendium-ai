@@ -53,7 +53,10 @@ internal sealed class OpenRouterCompletionRequest
 /// </summary>
 internal sealed class OpenRouterReasoning
 {
-    /// <summary><c>low</c>, <c>high</c> or <c>max</c> for a GLM; left out for the model's default.</summary>
+    /// <summary>
+    /// <c>low</c>, <c>high</c> or <c>max</c> for GLM 5.3 and later, <c>high</c> or <c>xhigh</c> for GLM 5.2 (the efforts
+    /// the catalog lists); left out for the model's default.
+    /// </summary>
     [JsonPropertyName("effort")]
     public string? Effort { get; set; }
 

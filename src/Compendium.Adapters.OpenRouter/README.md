@@ -20,7 +20,8 @@ See [`docs/README.md`](docs/README.md) for full configuration, model routing, fa
 
 The GLM models go through the GLM dialect (`Compendium.Adapters.ZAi.Glm`, shared with the Z.ai and Mistral adapters —
 [`docs/adr/0001-glm-dialect.md`](../../docs/adr/0001-glm-dialect.md)): with `CompletionRequest.Reasoning`,
-`reasoning: {effort, exclude}` (`low` / `high` / `max`; never `effort: "none"`, GLM 5.3's reasoning is mandatory);
+`reasoning: {effort, exclude}` (`low` / `high` / `max` for GLM 5.3, `high` / `xhigh` for GLM 5.2, the efforts the
+catalog lists; never `effort: "none"`, GLM 5.3's reasoning is mandatory);
 `max_tokens` with room for the reasoning, with or without it; `reasoning` / `reasoning_details` read into
 `ReasoningDelta` / `Reasoning` when asked for, never into the answer; `reasoning_tokens` into `UsageStats.ReasoningTokens`;
 and the usage frame OpenRouter sends after the last content chunk read into the final chunk. Every other model is sent

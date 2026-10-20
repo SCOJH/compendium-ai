@@ -24,7 +24,10 @@ internal sealed class ZAiChatCompletionRequest
     [JsonPropertyName("thinking")]
     public ZAiThinking? Thinking { get; set; }
 
-    /// <summary><c>low</c>, <c>high</c> or <c>max</c> (GLM 5.2 and later); left out for the default, <c>max</c>.</summary>
+    /// <summary>
+    /// <c>low</c>, <c>high</c> or <c>max</c> (GLM 5.3 and later), <c>high</c> or <c>xhigh</c> (GLM 5.2, which Z.ai runs
+    /// at <c>max</c>); left out for the default, <c>max</c>.
+    /// </summary>
     [JsonPropertyName("reasoning_effort")]
     public string? ReasoningEffort { get; set; }
 

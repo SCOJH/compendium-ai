@@ -245,9 +245,10 @@ internal sealed class MistralAIProvider : IAIProvider
             Stream = stream,
 
             // Mistral's reasoning has one setting that returns the thinking: "high". The sampling parameters stay: a
-            // reasoning model takes them (Magistral recommends 0.7 / 0.95). A GLM always returns its thinking, and takes
-            // low / high / max (https://docs.mistral.ai/studio/conversations/reasoning.md, read 2026-10-20): its effort
-            // is the dialect's, none when the caller asks none. No `thinking` field: Mistral has none.
+            // reasoning model takes them (Magistral recommends 0.7 / 0.95). A GLM always returns its thinking; GLM 5.3
+            // takes low / high / max (https://docs.mistral.ai/studio/conversations/reasoning.md, read 2026-10-20), GLM
+            // 5.2 high / xhigh: its effort is the dialect's, none when the caller asks none. No `thinking` field:
+            // Mistral has none.
             ReasoningEffort = glm is null
                 ? request.Reasoning is null ? null : "high"
                 : GlmDialect.EffortFor(glm, request.Reasoning)

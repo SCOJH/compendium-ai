@@ -22,9 +22,13 @@ namespace Compendium.Adapters.ZAi.Glm;
 /// <c>z-ai/glm-5.3</c> and <c>~z-ai/glm-latest</c> (OpenRouter), <c>zai-org/GLM-5.3</c> (Hugging Face), with a tier
 /// (<c>-flash</c>, <c>-flashx</c>, <c>-prime</c>, <c>-turbo</c>, <c>-air</c>, <c>v</c>) and a variant suffix
 /// (<c>:batch</c>). Anything else is not GLM, and the host sends it exactly as before.</item>
-/// <item><b>Effort</b> — GLM 5.2 and later take <c>low</c>, <c>high</c> or <c>max</c>; GLM 5.3 refuses any other value on
-/// Z.ai's API. The five levels of <see cref="Abstractions.AI.Models.ReasoningEffort"/> are brought onto that scale the
-/// way Z.ai's own compatibility mapping does: low → low, medium and high → high, xhigh and max → max.</item>
+/// <item><b>Effort</b> — GLM 5.3 and later take <c>low</c>, <c>high</c> or <c>max</c>, and refuse any other value on
+/// Z.ai's API; the five levels of <see cref="Abstractions.AI.Models.ReasoningEffort"/> are brought onto that scale the
+/// way Z.ai's own compatibility mapping does: low → low, medium and high → high, xhigh and max → max. GLM 5.2 has no
+/// <c>low</c> (Z.ai runs low and medium at high, xhigh at max), OpenRouter lists only <c>xhigh</c>, <c>high</c> and
+/// <c>none</c> for it, and Mistral's enum has no <c>max</c>: it gets the two values every host takes, low, medium and
+/// high → high, xhigh and max → xhigh (https://docs.z.ai/guides/capabilities/thinking.md and the public catalog
+/// <c>GET https://openrouter.ai/api/v1/models</c>, both read 2026-10-20).</item>
 /// <item><b>Room for the reasoning</b> — the reasoning counts against <c>max_tokens</c>, and GLM reasons by default (5.3
 /// always, at <c>max</c> unless told otherwise): <see cref="MaxTokens"/> adds room for it to the answer's, so a short
 /// <c>max_tokens</c> is not spent before the answer starts.</item>
@@ -94,9 +98,9 @@ public static partial class GlmDialect
     }
 
     /// <summary>
-    /// The <c>reasoning_effort</c> to send for <paramref name="reasoning"/>: <c>low</c>, <c>high</c> or <c>max</c>, or
-    /// <see langword="null"/> to send none (no <see cref="ReasoningOptions.Effort"/> asked, or a GLM that takes no effort)
-    /// and leave the host's default.
+    /// The <c>reasoning_effort</c> to send for <paramref name="reasoning"/>: <c>low</c>, <c>high</c> or <c>max</c> from
+    /// GLM 5.3 on, <c>high</c> or <c>xhigh</c> for GLM 5.2, or <see langword="null"/> to send none (no
+    /// <see cref="ReasoningOptions.Effort"/> asked, or a GLM that takes no effort) and leave the host's default.
     /// </summary>
     public static string? EffortFor(GlmModel model, ReasoningOptions? reasoning)
     {
@@ -104,6 +108,19 @@ public static partial class GlmDialect
         if (!model.TakesReasoningEffort || reasoning?.Effort is not { } effort)
         {
             return null;
+        }
+
+        // GLM 5.2 has no low (Z.ai runs low and medium at high), OpenRouter lists only xhigh / high / none for it, and
+        // Mistral's enum has xhigh but no max: high and xhigh are the two values all three hosts take (Z.ai runs xhigh at
+        // max).
+        if (!model.IsAtLeast(5, 3))
+        {
+            return effort switch
+            {
+                ReasoningEffort.Low or ReasoningEffort.Medium or ReasoningEffort.High => "high",
+                ReasoningEffort.XHigh or ReasoningEffort.Max => "xhigh",
+                _ => null,
+            };
         }
 
         return effort switch
@@ -117,8 +134,8 @@ public static partial class GlmDialect
 
     /// <summary>
     /// The tokens to add to <c>max_tokens</c> for the reasoning: <see cref="ReasoningOptions.BudgetTokens"/> when the
-    /// caller gives one, else one per effort (the effort sent, or the model's default <c>max</c>; a GLM that takes no
-    /// effort gets <see cref="HighEffortHeadroom"/>). None for a GLM that does not reason.
+    /// caller gives one, else one per effort (the effort sent, <c>xhigh</c> counting as <c>max</c>, or the model's default
+    /// <c>max</c>; a GLM that takes no effort gets <see cref="HighEffortHeadroom"/>). None for a GLM that does not reason.
     /// </summary>
     public static int ReasoningHeadroom(GlmModel model, ReasoningOptions? reasoning)
     {

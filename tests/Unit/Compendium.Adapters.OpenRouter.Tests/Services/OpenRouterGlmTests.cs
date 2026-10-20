@@ -15,7 +15,8 @@ namespace Compendium.Adapters.OpenRouter.Tests.Services;
 /// <c>reasoning</c> request object, <c>message.reasoning</c>, <c>delta.reasoning</c> / <c>reasoning_details</c>, the
 /// reasoning counted against <c>max_tokens</c>), https://openrouter.ai/docs/api_reference/streaming.md (the
 /// <c>: OPENROUTER PROCESSING</c> comments, and the usage frame after the last content chunk that repeats its finish
-/// reason), the public catalog https://openrouter.ai/api/v1/models (GLM 5.3: reasoning mandatory, efforts max / high / low).
+/// reason), the public catalog https://openrouter.ai/api/v1/models (GLM 5.3: reasoning mandatory, efforts max / high / low;
+/// GLM 5.2: efforts xhigh / high / none).
 /// The <c>format</c> of GLM's <c>reasoning_details</c> is not documented; only their <c>reasoning.text</c> entries are read.
 /// </summary>
 public class OpenRouterGlmTests
@@ -140,6 +141,19 @@ public class OpenRouterGlmTests
         reasoning.TryGetProperty("exclude", out _).Should().BeFalse();
         reasoning.TryGetProperty("max_tokens", out _).Should().BeFalse("OpenRouter turns a budget into an effort for GLM");
         reasoning.TryGetProperty("enabled", out _).Should().BeFalse("GLM 5.3's reasoning is mandatory");
+        sent.GetProperty("max_tokens").GetInt32().Should().Be(1_000 + room);
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, "high", 16_384)]
+    [InlineData(ReasoningEffort.High, "high", 16_384)]
+    [InlineData(ReasoningEffort.XHigh, "xhigh", 32_768)]
+    [InlineData(ReasoningEffort.Max, "xhigh", 32_768)]
+    public async Task TheRequest_ToGlm52_SendsOnlyAnEffortTheCatalogLists(ReasoningEffort effort, string wire, int room)
+    {
+        var (_, sent) = await StreamAsync(Stream, new ReasoningOptions { Effort = effort }, model: "z-ai/glm-5.2", maxTokens: 1_000);
+
+        sent.GetProperty("reasoning").GetProperty("effort").GetString().Should().Be(wire).And.BeOneOf("xhigh", "high");
         sent.GetProperty("max_tokens").GetInt32().Should().Be(1_000 + room);
     }
 

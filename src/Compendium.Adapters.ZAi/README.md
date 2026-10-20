@@ -38,7 +38,7 @@ https://docs.z.ai/guides/capabilities/streaming.md on 2026-10-20.
 | `CompletionRequest` | Request |
 |---|---|
 | `Reasoning` unset | no `thinking`, no `reasoning_effort` (Z.ai's defaults: enabled, `max`); `max_tokens` = answer + 32 768, at most 131 072 |
-| `Reasoning` set | `thinking: {type: "enabled"}` — never `disabled`, an error on GLM 5.3 — and `reasoning_effort` `low` / `high` / `max` (5.2+) |
+| `Reasoning` set | `thinking: {type: "enabled"}` — never `disabled`, an error on GLM 5.3 — and `reasoning_effort` `low` / `high` / `max` (5.3+), `high` / `xhigh` (5.2, which Z.ai runs at `max`) |
 | `MaxTokens` | the answer's room; the reasoning's is added (`BudgetTokens`, else per effort) |
 | `Temperature`, `TopP`, `StopSequences` | sent as given (Z.ai: temperature in [0, 1], one stop word) |
 | `FrequencyPenalty`, `PresencePenalty`, `Message.Name` | not sent: Z.ai's schema has none |
