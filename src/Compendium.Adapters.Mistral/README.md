@@ -81,9 +81,13 @@ OpenRouter adapters — [`docs/adr/0001-glm-dialect.md`](../../docs/adr/0001-glm
 
 - their content is always a list of `thinking` and `text` chunks, in a stream too: the thinking goes to
   `ReasoningDelta` / `Reasoning` when `CompletionRequest.Reasoning` asks for it, never into the answer;
-- `reasoning_effort` is `low`, `high` or `max` for GLM 5.3, `high` or `xhigh` for GLM 5.2 (from
-  `ReasoningOptions.Effort`; none when no effort is asked), and no `thinking` field is sent (Mistral has none);
-- `max_tokens` gets room for the reasoning on top of the answer's, with or without `Reasoning`: GLM 5.3 reasons anyway;
+- `reasoning_effort` is `low` or `high` for GLM 5.3 — `Low` → `low`; `Medium`, `High`, `XHigh` and `Max` → `high` —
+  and `high` or `xhigh` for GLM 5.2 (from `ReasoningOptions.Effort`; none when no effort is asked). Mistral's reasoning
+  guide lists `max` for `zai-glm-5-3`, but its API's `ReasoningEffort` enum (`none` … `xhigh`) does not, so `max` is not
+  sent. No `thinking` field is sent (Mistral has none);
+- `max_tokens` gets room for the reasoning on top of the answer's, with or without `Reasoning` (GLM 5.3 reasons
+  anyway): the caller's `BudgetTokens`, else room for the effort actually sent — 4 096 for `low`, 16 384 for `high`,
+  32 768 for `xhigh` or when no effort is sent;
 - `ListModelsAsync` fills their context window (1M), output limit (128K) and `Metadata["reasoning"] = "always"`.
 
 Every other model is sent and read exactly as before.

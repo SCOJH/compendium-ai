@@ -47,6 +47,12 @@ internal sealed class MistralAIProvider : IAIProvider
         "codestral-2405"
     };
 
+    // Mistral's ReasoningEffort enum (https://docs.mistral.ai/openapi.yaml, read 2026-10-20) stops at xhigh; only its
+    // reasoning guide (https://docs.mistral.ai/studio/conversations/reasoning.md, same date) lists max for zai-glm-5-3.
+    // Until a measurement says Mistral takes max, GLM 5.3's xhigh and max go as high, and the room for the reasoning
+    // follows. GLM 5.2's high / xhigh are in the enum and unchanged.
+    private const bool GlmHostTakesMax = false;
+
     private readonly MistralHttpClient _httpClient;
     private readonly MistralOptions _options;
     private readonly ILogger<MistralAIProvider> _logger;
@@ -239,19 +245,19 @@ internal sealed class MistralAIProvider : IAIProvider
             Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
             MaxTokens = glm is null
                 ? request.MaxTokens ?? _options.DefaultMaxTokens
-                : GlmDialect.MaxTokens(glm, request.MaxTokens, request.Reasoning, _options.DefaultMaxTokens),
+                : GlmDialect.MaxTokens(glm, request.MaxTokens, request.Reasoning, _options.DefaultMaxTokens, GlmHostTakesMax),
             TopP = request.TopP,
             Stop = request.StopSequences?.ToList(),
             Stream = stream,
 
             // Mistral's reasoning has one setting that returns the thinking: "high". The sampling parameters stay: a
             // reasoning model takes them (Magistral recommends 0.7 / 0.95). A GLM always returns its thinking; GLM 5.3
-            // takes low / high / max (https://docs.mistral.ai/studio/conversations/reasoning.md, read 2026-10-20), GLM
-            // 5.2 high / xhigh: its effort is the dialect's, none when the caller asks none. No `thinking` field:
-            // Mistral has none.
+            // gets low / high (its guide also lists max, the API's enum does not: see GlmHostTakesMax), GLM 5.2
+            // high / xhigh: its effort is the dialect's, none when the caller asks none. No `thinking` field: Mistral
+            // has none.
             ReasoningEffort = glm is null
                 ? request.Reasoning is null ? null : "high"
-                : GlmDialect.EffortFor(glm, request.Reasoning)
+                : GlmDialect.EffortFor(glm, request.Reasoning, GlmHostTakesMax)
         };
 
         ApplyTools(apiRequest, request);

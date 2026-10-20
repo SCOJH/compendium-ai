@@ -18,6 +18,9 @@ namespace Compendium.Adapters.Mistral.Tests.Services;
 /// containing a ThinkChunk", then "a single list containing both a closing ThinkChunk and the first TextChunk", then the
 /// answer: a plain string for Mistral's models, lists for GLM if there is truly no string mode. Both are read. The usage
 /// comes on the chunk that carries the finish reason (https://docs.mistral.ai/studio/conversations/chat-completion.md).
+/// The effort: the reasoning guide lists low / high / max for zai-glm-5-3, but the API's ReasoningEffort enum
+/// (https://docs.mistral.ai/openapi.yaml, same date) is none / minimal / low / medium / high / xhigh, with no max, so GLM
+/// 5.3 is sent low or high, and GLM 5.2 high or xhigh.
 /// </summary>
 public class MistralGlmTests
 {
@@ -127,7 +130,7 @@ public class MistralGlmTests
         sent.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
         sent.TryGetProperty("thinking", out _).Should().BeFalse("Mistral has no thinking field");
         sent.TryGetProperty("prompt_mode", out _).Should().BeFalse();
-        sent.GetProperty("max_tokens").GetInt32().Should().Be(4096 + 32_768, "GLM 5.3 reasons anyway, at max by default");
+        sent.GetProperty("max_tokens").GetInt32().Should().Be(4096 + 32_768, "GLM 5.3 reasons anyway, and no effort is sent: its own default, max, may run");
         sent.GetProperty("temperature").GetSingle().Should().Be(0.7f, "sampling is kept: GLM takes it");
         sent.GetProperty("stop")[0].GetString().Should().Be("</tool_call>");
     }
@@ -136,15 +139,29 @@ public class MistralGlmTests
     [InlineData(ReasoningEffort.Low, "low", 1_000 + 4_096)]
     [InlineData(ReasoningEffort.Medium, "high", 1_000 + 16_384)]
     [InlineData(ReasoningEffort.High, "high", 1_000 + 16_384)]
-    [InlineData(ReasoningEffort.XHigh, "max", 1_000 + 32_768)]
-    [InlineData(ReasoningEffort.Max, "max", 1_000 + 32_768)]
-    public async Task TheRequest_Asked_TakesTheEffortOnGlmsScale(ReasoningEffort effort, string wire, int maxTokens)
+    [InlineData(ReasoningEffort.XHigh, "high", 1_000 + 16_384)]
+    [InlineData(ReasoningEffort.Max, "high", 1_000 + 16_384)]
+    public async Task TheRequest_Asked_TakesTheEffortOnGlmsScale_UpToHigh_SinceTheEnumHasNoMax(ReasoningEffort effort, string wire, int maxTokens)
     {
         var (_, sent) = await StreamAsync(ListsOnly, new ReasoningOptions { Effort = effort }, maxTokens: 1_000);
 
+        sent.GetProperty("reasoning_effort").GetString().Should().Be(wire).And.NotBe("max");
+        sent.GetProperty("max_tokens").GetInt32().Should().Be(maxTokens, "the room follows the effort sent");
+        sent.TryGetProperty("thinking", out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, "high", 1_000 + 16_384)]
+    [InlineData(ReasoningEffort.Medium, "high", 1_000 + 16_384)]
+    [InlineData(ReasoningEffort.High, "high", 1_000 + 16_384)]
+    [InlineData(ReasoningEffort.XHigh, "xhigh", 1_000 + 32_768)]
+    [InlineData(ReasoningEffort.Max, "xhigh", 1_000 + 32_768)]
+    public async Task TheRequest_ToGlm52_KeepsHighOrXHigh_WhichTheEnumLists(ReasoningEffort effort, string wire, int maxTokens)
+    {
+        var (_, sent) = await StreamAsync(ListsOnly, new ReasoningOptions { Effort = effort }, model: "zai-glm-5-2", maxTokens: 1_000);
+
         sent.GetProperty("reasoning_effort").GetString().Should().Be(wire);
         sent.GetProperty("max_tokens").GetInt32().Should().Be(maxTokens);
-        sent.TryGetProperty("thinking", out _).Should().BeFalse();
     }
 
     [Fact]

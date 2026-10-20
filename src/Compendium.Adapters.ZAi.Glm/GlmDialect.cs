@@ -28,7 +28,10 @@ namespace Compendium.Adapters.ZAi.Glm;
 /// <c>low</c> (Z.ai runs low and medium at high, xhigh at max), OpenRouter lists only <c>xhigh</c>, <c>high</c> and
 /// <c>none</c> for it, and Mistral's enum has no <c>max</c>: it gets the two values every host takes, low, medium and
 /// high → high, xhigh and max → xhigh (https://docs.z.ai/guides/capabilities/thinking.md and the public catalog
-/// <c>GET https://openrouter.ai/api/v1/models</c>, both read 2026-10-20).</item>
+/// <c>GET https://openrouter.ai/api/v1/models</c>, both read 2026-10-20). A host whose API does not take <c>max</c> says
+/// so (<c>hostTakesMax: false</c>): Mistral's <c>ReasoningEffort</c> enum stops at <c>xhigh</c>
+/// (https://docs.mistral.ai/openapi.yaml, read 2026-10-20) though its GLM guide lists <c>max</c>, so GLM 5.3's xhigh
+/// and max go there as <c>high</c>, the next value down on its scale.</item>
 /// <item><b>Room for the reasoning</b> — the reasoning counts against <c>max_tokens</c>, and GLM reasons by default (5.3
 /// always, at <c>max</c> unless told otherwise): <see cref="MaxTokens"/> adds room for it to the answer's, so a short
 /// <c>max_tokens</c> is not spent before the answer starts.</item>
@@ -99,10 +102,18 @@ public static partial class GlmDialect
 
     /// <summary>
     /// The <c>reasoning_effort</c> to send for <paramref name="reasoning"/>: <c>low</c>, <c>high</c> or <c>max</c> from
-    /// GLM 5.3 on, <c>high</c> or <c>xhigh</c> for GLM 5.2, or <see langword="null"/> to send none (no
-    /// <see cref="ReasoningOptions.Effort"/> asked, or a GLM that takes no effort) and leave the host's default.
+    /// GLM 5.3 on (<c>low</c> or <c>high</c> on a host that does not take <c>max</c>), <c>high</c> or <c>xhigh</c> for
+    /// GLM 5.2, or <see langword="null"/> to send none (no <see cref="ReasoningOptions.Effort"/> asked, or a GLM that
+    /// takes no effort) and leave the host's default.
     /// </summary>
-    public static string? EffortFor(GlmModel model, ReasoningOptions? reasoning)
+    /// <param name="model">The GLM model the request goes to.</param>
+    /// <param name="reasoning">The caller's reasoning options, if any.</param>
+    /// <param name="hostTakesMax">
+    /// Whether the host's API takes <c>max</c>. With <see langword="false"/>, GLM 5.3's xhigh and max are sent as
+    /// <c>high</c>, the next value down on its scale (<c>xhigh</c> is not on it). GLM 5.2 is never sent <c>max</c>, so
+    /// nothing changes for it.
+    /// </param>
+    public static string? EffortFor(GlmModel model, ReasoningOptions? reasoning, bool hostTakesMax = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (!model.TakesReasoningEffort || reasoning?.Effort is not { } effort)
@@ -127,7 +138,7 @@ public static partial class GlmDialect
         {
             ReasoningEffort.Low => "low",
             ReasoningEffort.Medium or ReasoningEffort.High => "high",
-            ReasoningEffort.XHigh or ReasoningEffort.Max => "max",
+            ReasoningEffort.XHigh or ReasoningEffort.Max => hostTakesMax ? "max" : "high",
             _ => null,
         };
     }
@@ -137,7 +148,10 @@ public static partial class GlmDialect
     /// caller gives one, else one per effort (the effort sent, <c>xhigh</c> counting as <c>max</c>, or the model's default
     /// <c>max</c>; a GLM that takes no effort gets <see cref="HighEffortHeadroom"/>). None for a GLM that does not reason.
     /// </summary>
-    public static int ReasoningHeadroom(GlmModel model, ReasoningOptions? reasoning)
+    /// <param name="model">The GLM model the request goes to.</param>
+    /// <param name="reasoning">The caller's reasoning options, if any.</param>
+    /// <param name="hostTakesMax">As for <see cref="EffortFor"/>: the room follows the effort actually sent.</param>
+    public static int ReasoningHeadroom(GlmModel model, ReasoningOptions? reasoning, bool hostTakesMax = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (!model.ReasonsByDefault)
@@ -155,7 +169,7 @@ public static partial class GlmDialect
             return HighEffortHeadroom;
         }
 
-        return EffortFor(model, reasoning) switch
+        return EffortFor(model, reasoning, hostTakesMax) switch
         {
             "low" => LowEffortHeadroom,
             "high" => HighEffortHeadroom,
@@ -166,13 +180,19 @@ public static partial class GlmDialect
     /// <summary>
     /// The <c>max_tokens</c> to send: the answer's room (<paramref name="requested"/>, else
     /// <paramref name="adapterDefault"/>) plus <see cref="ReasoningHeadroom"/>, never above the model's
-    /// <see cref="GlmModel.MaxOutputTokens"/>. It applies with or without <see cref="ReasoningOptions"/>: a GLM reasons
-    /// unasked, and its reasoning would otherwise take the answer's room.
+    /// <see cref="GlmModel.MaxOutputTokens"/>. It applies with or without <see cref="ReasoningOptions"/>, a deliberate
+    /// exception, for GLM only, to "unset, the request is the one it was": a GLM reasons unasked, and its reasoning would
+    /// otherwise take the answer's room.
     /// </summary>
-    public static int MaxTokens(GlmModel model, int? requested, ReasoningOptions? reasoning, int adapterDefault)
+    /// <param name="model">The GLM model the request goes to.</param>
+    /// <param name="requested">The caller's <c>MaxTokens</c>, if any.</param>
+    /// <param name="reasoning">The caller's reasoning options, if any.</param>
+    /// <param name="adapterDefault">The adapter's default <c>max_tokens</c>, for the answer when none is requested.</param>
+    /// <param name="hostTakesMax">As for <see cref="EffortFor"/>: the room follows the effort actually sent.</param>
+    public static int MaxTokens(GlmModel model, int? requested, ReasoningOptions? reasoning, int adapterDefault, bool hostTakesMax = true)
     {
         ArgumentNullException.ThrowIfNull(model);
-        var total = (long)(requested ?? adapterDefault) + ReasoningHeadroom(model, reasoning);
+        var total = (long)(requested ?? adapterDefault) + ReasoningHeadroom(model, reasoning, hostTakesMax);
         if (model.MaxOutputTokens is { } cap && total > cap)
         {
             total = cap;

@@ -131,7 +131,9 @@ public class OpenRouterGlmTests
     [Theory]
     [InlineData(ReasoningEffort.Low, "low", 4_096)]
     [InlineData(ReasoningEffort.Medium, "high", 16_384)]
+    [InlineData(ReasoningEffort.High, "high", 16_384)]
     [InlineData(ReasoningEffort.XHigh, "max", 32_768)]
+    [InlineData(ReasoningEffort.Max, "max", 32_768)]
     public async Task TheRequest_Asked_SendsTheEffortOnGlmsScale(ReasoningEffort effort, string wire, int room)
     {
         var (_, sent) = await StreamAsync(Stream, new ReasoningOptions { Effort = effort }, maxTokens: 1_000);

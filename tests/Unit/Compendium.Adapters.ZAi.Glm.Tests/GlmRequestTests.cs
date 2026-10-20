@@ -12,9 +12,10 @@ namespace Compendium.Adapters.ZAi.Glm.Tests;
 /// 2026-10-20: GLM 5.3 takes low / high / max only, "any other input will result in an error"; the compatibility mapping
 /// brings low to low, medium and high to high, xhigh and max to max). GLM 5.2 has no low: Z.ai maps "low/medium" to
 /// high and xhigh to max (same page), and OpenRouter's public catalog (GET https://openrouter.ai/api/v1/models, same
-/// date) lists only xhigh / high / none for z-ai/glm-5.2, so 5.2 gets high or xhigh. The reasoning counts against
-/// max_tokens (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, same date), hence the room added for
-/// it.
+/// date) lists only xhigh / high / none for z-ai/glm-5.2, so 5.2 gets high or xhigh. Mistral's ReasoningEffort enum
+/// (https://docs.mistral.ai/openapi.yaml, same date) is none / minimal / low / medium / high / xhigh, no max: on a host
+/// that does not take max, GLM 5.3 stops at high. The reasoning counts against max_tokens
+/// (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, same date), hence the room added for it.
 /// </summary>
 public class GlmRequestTests
 {
@@ -61,6 +62,55 @@ public class GlmRequestTests
         }
 
         GlmDialect.EffortFor(Glm52, new ReasoningOptions { Effort = (ReasoningEffort)42 }).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, "low", GlmDialect.LowEffortHeadroom)]
+    [InlineData(ReasoningEffort.Medium, "high", GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.High, "high", GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.XHigh, "high", GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.Max, "high", GlmDialect.HighEffortHeadroom)]
+    public void OnAHostWithoutMax_Glm53StopsAtHigh_AndTheRoomFollows(ReasoningEffort effort, string expected, int room)
+    {
+        var reasoning = new ReasoningOptions { Effort = effort };
+
+        GlmDialect.EffortFor(Glm53, reasoning, hostTakesMax: false).Should().Be(expected);
+        GlmDialect.EffortFor(GlmDialect.Recognise("zai-glm-5-3")!, reasoning, hostTakesMax: false).Should().Be(expected);
+        GlmDialect.EffortFor(GlmDialect.Recognise("zai-glm-latest")!, reasoning, hostTakesMax: false).Should().Be(expected);
+        GlmDialect.ReasoningHeadroom(Glm53, reasoning, hostTakesMax: false).Should().Be(room);
+        GlmDialect.MaxTokens(Glm53, 1_000, reasoning, 4096, hostTakesMax: false).Should().Be(1_000 + room);
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low)]
+    [InlineData(ReasoningEffort.Medium)]
+    [InlineData(ReasoningEffort.High)]
+    [InlineData(ReasoningEffort.XHigh)]
+    [InlineData(ReasoningEffort.Max)]
+    public void OnAHostWithoutMax_Glm52KeepsHighOrXHigh(ReasoningEffort effort)
+    {
+        // GLM 5.2 is never sent max: its high / xhigh are in Mistral's enum, so a host without max changes nothing.
+        var reasoning = new ReasoningOptions { Effort = effort };
+
+        GlmDialect.EffortFor(Glm52, reasoning, hostTakesMax: false).Should().Be(GlmDialect.EffortFor(Glm52, reasoning));
+        GlmDialect.ReasoningHeadroom(Glm52, reasoning, hostTakesMax: false).Should().Be(GlmDialect.ReasoningHeadroom(Glm52, reasoning));
+    }
+
+    [Fact]
+    public void OnAHostWithoutMax_NoEffortAsked_SendsNone_AndKeepsTheRoomOfTheModelsDefault()
+    {
+        GlmDialect.EffortFor(Glm53, null, hostTakesMax: false).Should().BeNull();
+        GlmDialect.EffortFor(Glm53, new ReasoningOptions(), hostTakesMax: false).Should().BeNull();
+        GlmDialect.EffortFor(Glm51, new ReasoningOptions { Effort = ReasoningEffort.Max }, hostTakesMax: false).Should().BeNull();
+
+        foreach (var effort in Enum.GetValues<ReasoningEffort>())
+        {
+            GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = effort }, hostTakesMax: false).Should().BeOneOf("low", "high");
+        }
+
+        // No effort sent, the host's default runs: the room stays the one for GLM 5.3's own default, max.
+        GlmDialect.ReasoningHeadroom(Glm53, null, hostTakesMax: false).Should().Be(GlmDialect.MaxEffortHeadroom);
+        GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions { BudgetTokens = 10_000 }, hostTakesMax: false).Should().Be(10_000);
     }
 
     [Fact]

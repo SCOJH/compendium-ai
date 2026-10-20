@@ -17,7 +17,7 @@ Two kinds of knowledge are involved, and they do not overlap.
 | | Mistral | Z.ai | OpenRouter |
 |---|---|---|---|
 | Ask for reasoning | always on; `reasoning_effort`, no `thinking` field | `thinking: {type: "enabled"}` (default); `disabled` is an error on 5.3 | `reasoning: {effort, exclude}`; reasoning mandatory for 5.3 |
-| Effort, 5.3 | `low` · `high` · `max` (guide; the OpenAPI enum has no `max`) | `low` · `high` · `max`, default `max`; anything else is an error | `low` · `high` · `max`, default `max` (catalog) |
+| Effort, 5.3 | `low` · `high` · `max` in the guide, but the OpenAPI enum (`none` … `xhigh`) has no `max`: sent `low` or `high` | `low` · `high` · `max`, default `max`; anything else is an error | `low` · `high` · `max`, default `max` (catalog) |
 | Effort, 5.2 | not in the guide; the OpenAPI enum is `none` … `xhigh`, no `max` | `max` (default) … `none`; `low` and `medium` run at `high`, `xhigh` at `max` | `xhigh` · `high` · `none`, default `high` (catalog) |
 | Reasoning, response | `message.content[]`: `{type: "thinking", thinking: [{type: "text", text}]}` | `message.reasoning_content` (string) | `message.reasoning` (string), `reasoning_details[]` |
 | Answer, response | `message.content[]`: `{type: "text", text}` — always a list for GLM | `message.content` (string) | `message.content` (string) |
@@ -48,8 +48,7 @@ GLM 5.2 has no `low` of its own: Z.ai runs `low` and `medium` at `high` and `xhi
 every host takes for it (Z.ai's thinking guide and chat-completion OpenAPI, OpenRouter's catalog, read 2026-10-20). The
 reasoning counts against `max_tokens`, so with an adapter default of 4 096 and a model thinking at `max`, the answer
 can be left with no room at all (`finish_reason: length`, empty content, billed). A GLM id must be recognised whatever
-the host's prefix
-(`glm-5.3`, `zai-glm-5-3`, `z-ai/glm-5.3`, `~z-ai/glm-latest`, `zai-org/GLM-5.3`).
+the host's prefix (`glm-5.3`, `zai-glm-5-3`, `z-ai/glm-5.3`, `~z-ai/glm-latest`, `zai-org/GLM-5.3`).
 
 The first kind of knowledge cannot be shared: delegating Mistral's or OpenRouter's HTTP to a Z.ai client would send the
 wrong request and misread the answer. The second kind is what should be written once.
@@ -68,10 +67,12 @@ tool call with it. #30 reads the lists; this decision makes the rest of GLM's be
   always reasons, reasons by default, takes an effort, its context window and output limit. Anything else is not GLM.
 - `EffortFor`: `ReasoningOptions.Effort` on GLM's scale (`low` / `high` / `max` from 5.3 on; for 5.2, low, medium and
   high → `high`, xhigh and max → `xhigh`), nothing when no effort is asked (the host's default stays), and never `none`.
+  A host whose API does not take `max` passes `hostTakesMax: false`: GLM 5.3's xhigh and max are then sent as `high`,
+  the next value down on its scale (`xhigh` is not on it). GLM 5.2 is never sent `max`, so nothing changes for it.
 - `MaxTokens` / `ReasoningHeadroom`: the answer's room (`MaxTokens`, else the adapter's default) plus room for the
-  reasoning — the caller's `BudgetTokens`, else 4 096 / 16 384 / 32 768 for low / high / max or xhigh (max, the
-  default, when no effort is asked; 16 384 for a GLM that takes no effort) — never above the model's output limit
-  (131 072 for 5.2+).
+  reasoning — the caller's `BudgetTokens`, else 4 096 / 16 384 / 32 768 for low / high / max or xhigh, following the
+  effort actually sent (16 384 for `high` on a host without `max`; max, the model's default, when no effort is asked;
+  16 384 for a GLM that takes no effort) — never above the model's output limit (131 072 for 5.2+).
 - `Chunk`, `Surface`, `MapFinishReason`, `Describe`: the normalisation. The answer alone in `ContentDelta` / `Content`;
   the reasoning in `ReasoningDelta` / `Reasoning` only when asked for, never in the answer; a delta with nothing to pass
   on is skipped (so the same logical stream reads as the same chunks on every host); GLM's extra finish reasons; a host's
@@ -90,9 +91,11 @@ Compendium.Adapters.OpenRouter ─┘
   `reasoning_content`, native tool calls (`arguments` read as a string or an object), `tool_choice` limited to `auto`
   (anything else is refused before the request is sent), Z.ai's business error codes (an exhausted balance is a 429 with
   code 1113: `InsufficientCredits`, not a rate limit).
-- `Compendium.Adapters.Mistral`: for a GLM id, the effort and `max_tokens` come from the dialect (no `thinking` field:
-  Mistral has none) and the chunk lists, read as before, go through the dialect's normalisation; a text part without a
-  `type` (the schema's default is `text`) is kept in a stream as it already was in a response.
+- `Compendium.Adapters.Mistral`: for a GLM id, the effort and `max_tokens` come from the dialect, with
+  `hostTakesMax: false` (Mistral's `ReasoningEffort` enum stops at `xhigh`), so GLM 5.3 gets `low` or `high` and GLM
+  5.2 `high` or `xhigh`; no `thinking` field (Mistral has none). The chunk lists, read as before, go through the
+  dialect's normalisation; a text part without a `type` (the schema's default is `text`) is kept in a stream as it
+  already was in a response.
 - `Compendium.Adapters.OpenRouter`: for a GLM id, `reasoning: {effort, exclude}` (nothing at all when there is nothing
   to say: an empty object would ask OpenRouter's own default), `max_tokens` from the dialect, `reasoning` /
   `reasoning_details` read apart, `reasoning_tokens` reported, and the trailing usage frame read: the finish reason of
@@ -121,11 +124,14 @@ adapters before the dialect existed, and are committed on their own ahead of it.
   reference a second package, a dialect, never another adapter.
 - **A public API to keep in semver**: `GlmDialect`, `GlmModel`. The single release train (one tag, MinVer) keeps the
   versions aligned inside the repository; a third party that pins it takes it on.
-- **NuGet ids are permanent**: `Compendium.Adapters.ZAi` and `Compendium.Adapters.ZAi.Glm` should be confirmed before
-  the first publish.
+- **NuGet ids are permanent**: `Compendium.Adapters.ZAi` and `Compendium.Adapters.ZAi.Glm`, confirmed on 2026-10-20.
 - **`max_tokens` changes for a GLM even without `ReasoningOptions`**, against the letter of `ReasoningOptions`
-  ("unset, the request is the one it was"): the model reasons unasked, and without room the answer can be empty. The
-  room is a cap, not a spend; the figures (4 096 / 16 384 / 32 768) are a starting point to measure, not a measurement.
+  ("unset, the request is the one it was", #30). This is a deliberate exception, approved by the founder on
+  2026-10-20, and it holds for GLM only: the model reasons unasked, and without room the answer can be empty. The room
+  is a cap, not a spend; the figures (4 096 / 16 384 / 32 768) are a starting point to measure, not a measurement.
+- **Mistral is not sent `max`**, though its reasoning guide lists it for GLM 5.3: a caller asking `XHigh` or `Max` gets
+  `high` there and `max` on Z.ai or OpenRouter, so the same request may reason less on Mistral. The one place where the
+  same GLM is not shaped the same on every host; a measurement may reopen it.
 
 ## Alternatives considered
 
@@ -139,6 +145,17 @@ adapters before the dialect existed, and are committed on their own ahead of it.
 - **The dialect in `Compendium.Abstractions.AI`.** Rejected: the abstraction is interfaces and DTOs, no implementation.
 - **Mistral delegating its HTTP to a Z.ai provider.** Rejected: the wire formats differ (table above).
 
+## Decisions on the open points (2026-10-20)
+
+1. **NuGet ids**: `Compendium.Adapters.ZAi` and `Compendium.Adapters.ZAi.Glm`, unchanged.
+2. **Room for the reasoning in `max_tokens`**: always, for every GLM that reasons, with or without `ReasoningOptions`.
+   A deliberate, founder-approved exception to #30's "unset, the request is the one it was".
+3. **Effort on Mistral**: capped at `high` for GLM 5.3 and later (`Low` → `low`; `Medium`, `High`, `XHigh`, `Max` →
+   `high`), since Mistral's OpenAPI enum has no `max`; the room follows (16 384). Z.ai and OpenRouter keep `max`, which
+   both document for GLM 5.3. GLM 5.2 keeps `high` / `xhigh` on every host. `max` on Mistral may be reopened after a
+   measurement.
+4. **Z.ai `tool_choice` other than `auto`**: still refused with `AI.InvalidRequest` before the request is sent.
+
 ## Out of scope, and known gaps
 
 - **Native tool calls in a stream** (`delta.tool_calls`): `CompletionChunk` has no place for them, and no adapter of the
@@ -147,9 +164,11 @@ adapters before the dialect existed, and are committed on their own ahead of it.
   `AgentToolInvocation` has no call id. Mistral recommends replaying its thinking chunks, Z.ai offers Preserved Thinking
   (`clear_thinking: false`), OpenRouter `reasoning_details`; the abstraction forbids sending reasoning back. An
   abstraction change, not a dialect one.
-- **`max` on Mistral**: the reasoning guide says GLM 5.3 takes it, Mistral's OpenAPI enum does not list it. It is sent
-  only to GLM 5.3 and later, when the caller asks `XHigh` or `Max` (GLM 5.2 gets `xhigh`, which the enum lists); a
-  400/422 there would answer the question. Mistral's default effort for GLM is not documented.
+- **`max` on Mistral**: the reasoning guide says GLM 5.3 takes it, Mistral's OpenAPI enum (`none`, `minimal`, `low`,
+  `medium`, `high`, `xhigh`) does not list it. Decided on 2026-10-20: not sent. `XHigh` and `Max` go to GLM 5.3 as
+  `high`, with the room for `high` (16 384); GLM 5.2 keeps `xhigh`, which the enum lists. Whether Mistral takes `max`
+  is left to a measurement; if it does, the Mistral adapter's `GlmHostTakesMax` flips to `true`. Mistral's default
+  effort for GLM is not documented, so with no effort asked the room stays the one for the model's own default, `max`.
 - **Z.ai's other limits are passed through, not enforced**: `temperature` in [0, 1] (Mistral takes up to 1.5), one stop
   word, no penalties and no message `name` (not sent). The GLM Coding Plan endpoint (other billing, reasoning kept across
   turns by default) is a `BaseUrl` away, not a default.

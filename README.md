@@ -66,14 +66,15 @@ when the provider counts them. Never send it back as a conversation turn.
 |---|---|
 | Anthropic | Opus/Sonnet 4.6+, Fable, Mythos: `thinking: {type: "adaptive", display}` + `output_config.effort` (`xhigh` from Opus 4.7; a budget is refused there, so it is added to `max_tokens` as headroom). Earlier 4.x and Sonnet 3.7: `thinking: {type: "enabled", budget_tokens}` (≥ 1 024), `max_tokens` raised by it. No temperature, no top_p with thinking. Older models: unchanged. `thinking_delta` → `ReasoningDelta`. |
 | OpenAI | `reasoning_effort`, `max_completion_tokens` instead of `max_tokens`, no temperature / top_p / penalties; `reasoning_tokens` → `ReasoningTokens`. |
-| Mistral | `reasoning_effort: "high"`; `thinking` content chunks (a list, where the answer is a string) → `ReasoningDelta` / `Reasoning`. GLM (`zai-glm-*`): through the GLM dialect — `reasoning_effort` `low` / `high` / `max` (none unless an effort is asked), `max_tokens` with room for the reasoning, content always chunk lists. |
+| Mistral | `reasoning_effort: "high"`; `thinking` content chunks (a list, where the answer is a string) → `ReasoningDelta` / `Reasoning`. GLM (`zai-glm-*`): through the GLM dialect — `reasoning_effort` `low` / `high` for GLM 5.3 (`XHigh` and `Max` go as `high`: Mistral's API enum has no `max`), `high` / `xhigh` for GLM 5.2 (none unless an effort is asked), `max_tokens` with room for the reasoning, content always chunk lists. |
 | DeepSeek | `reasoning_content` → `ReasoningDelta` / `Reasoning` (unasked, dropped as before; `InlineReasoningInContent` unchanged). |
 | Z.ai | Through the GLM dialect: `thinking: {type: "enabled"}` (never `disabled`), `reasoning_effort` `low` / `high` / `max`, `max_tokens` with room for the reasoning; `reasoning_content` → `ReasoningDelta` / `Reasoning`. |
 | OpenRouter | GLM (`z-ai/glm-*`) only, through the GLM dialect: `reasoning: {effort, exclude}`, `max_tokens` with room for the reasoning; `reasoning` → `ReasoningDelta` / `Reasoning`, `reasoning_tokens` → `ReasoningTokens`. Other models: ignored. |
 | Others | ignored: the request is sent without it. |
 
 A GLM reasons unasked (GLM 5.3 always), so its `max_tokens` gets room for the reasoning with or without
-`Reasoning`. Every non-GLM request and response is pinned to the byte by golden tests.
+`Reasoning`: a deliberate exception, for GLM only, to "unset, every request is the one it was". Every non-GLM request
+and response is pinned to the byte by golden tests.
 
 The version is set by the tag (MinVer): this lands with the next `v1.1.0-preview.*` tag (`v1.1.0-preview.5` exists).
 
