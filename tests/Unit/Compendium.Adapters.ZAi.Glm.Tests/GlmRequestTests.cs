@@ -1,0 +1,113 @@
+// -----------------------------------------------------------------------
+// <copyright file="GlmRequestTests.cs" company="Sassy Solutions">
+//     Copyright (c) 2026 Sassy Solutions. Licensed under the MIT License.
+//     See LICENSE in the project root for license information.
+// </copyright>
+// -----------------------------------------------------------------------
+
+namespace Compendium.Adapters.ZAi.Glm.Tests;
+
+/// <summary>
+/// How a request to a GLM is shaped. The effort scale is Z.ai's (https://docs.z.ai/guides/capabilities/thinking.md, read
+/// 2026-10-20: GLM 5.3 takes low / high / max only, "any other input will result in an error"; the compatibility mapping
+/// brings low to low, medium and high to high, xhigh and max to max). The reasoning counts against max_tokens
+/// (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, same date), hence the room added for it.
+/// </summary>
+public class GlmRequestTests
+{
+    private static readonly GlmModel Glm53 = GlmDialect.Recognise("glm-5.3")!;
+    private static readonly GlmModel Glm52 = GlmDialect.Recognise("glm-5.2")!;
+    private static readonly GlmModel Glm51 = GlmDialect.Recognise("glm-5.1")!;
+    private static readonly GlmModel Glm4 = GlmDialect.Recognise("glm-4")!;
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, "low")]
+    [InlineData(ReasoningEffort.Medium, "high")]
+    [InlineData(ReasoningEffort.High, "high")]
+    [InlineData(ReasoningEffort.XHigh, "max")]
+    [InlineData(ReasoningEffort.Max, "max")]
+    public void TheEffort_IsBroughtOntoGlmsScale(ReasoningEffort effort, string expected)
+    {
+        GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+        GlmDialect.EffortFor(Glm52, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+    }
+
+    [Fact]
+    public void NoEffortAsked_SendsNone_AndNeverNoneOrAnotherWord()
+    {
+        GlmDialect.EffortFor(Glm53, null).Should().BeNull();
+        GlmDialect.EffortFor(Glm53, new ReasoningOptions()).Should().BeNull();
+        GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = (ReasoningEffort)42 }).Should().BeNull();
+
+        foreach (var effort in Enum.GetValues<ReasoningEffort>())
+        {
+            GlmDialect.EffortFor(Glm53, new ReasoningOptions { Effort = effort }).Should().BeOneOf("low", "high", "max");
+        }
+    }
+
+    [Fact]
+    public void AGlmThatTakesNoEffort_IsSentNone()
+    {
+        GlmDialect.EffortFor(Glm51, new ReasoningOptions { Effort = ReasoningEffort.Max }).Should().BeNull();
+        GlmDialect.EffortFor(Glm4, new ReasoningOptions { Effort = ReasoningEffort.Low }).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, GlmDialect.LowEffortHeadroom)]
+    [InlineData(ReasoningEffort.Medium, GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.High, GlmDialect.HighEffortHeadroom)]
+    [InlineData(ReasoningEffort.XHigh, GlmDialect.MaxEffortHeadroom)]
+    [InlineData(ReasoningEffort.Max, GlmDialect.MaxEffortHeadroom)]
+    public void TheRoomForTheReasoning_FollowsTheEffortSent(ReasoningEffort effort, int expected)
+    {
+        GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions { Effort = effort }).Should().Be(expected);
+    }
+
+    [Fact]
+    public void Unasked_TheRoomIsTheDefaultEffortsMax_BecauseAGlmReasonsAnyway()
+    {
+        GlmDialect.ReasoningHeadroom(Glm53, null).Should().Be(GlmDialect.MaxEffortHeadroom);
+        GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions()).Should().Be(GlmDialect.MaxEffortHeadroom);
+        GlmDialect.ReasoningHeadroom(Glm51, null).Should().Be(GlmDialect.HighEffortHeadroom, "it decides alone");
+        GlmDialect.ReasoningHeadroom(Glm51, new ReasoningOptions { Effort = ReasoningEffort.Low }).Should().Be(GlmDialect.HighEffortHeadroom);
+        GlmDialect.ReasoningHeadroom(Glm4, null).Should().Be(0, "it does not reason");
+    }
+
+    [Fact]
+    public void ABudget_IsTheRoom()
+    {
+        GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions { Effort = ReasoningEffort.Low, BudgetTokens = 10_000 }).Should().Be(10_000);
+        GlmDialect.ReasoningHeadroom(Glm53, new ReasoningOptions { BudgetTokens = 0 }).Should().Be(GlmDialect.MaxEffortHeadroom);
+        GlmDialect.ReasoningHeadroom(Glm4, new ReasoningOptions { BudgetTokens = 10_000 }).Should().Be(0);
+    }
+
+    [Fact]
+    public void MaxTokens_IsTheAnswersRoomPlusTheReasonings()
+    {
+        GlmDialect.MaxTokens(Glm53, null, null, 4096).Should().Be(4096 + GlmDialect.MaxEffortHeadroom);
+        GlmDialect.MaxTokens(Glm53, 500, new ReasoningOptions { Effort = ReasoningEffort.Low }, 4096).Should().Be(500 + GlmDialect.LowEffortHeadroom);
+        GlmDialect.MaxTokens(Glm53, 500, new ReasoningOptions { BudgetTokens = 2_000 }, 4096).Should().Be(2_500);
+        GlmDialect.MaxTokens(Glm4, 500, null, 4096).Should().Be(500, "no reasoning, no room, no known cap");
+        GlmDialect.MaxTokens(Glm4, int.MaxValue, null, 4096).Should().Be(int.MaxValue);
+    }
+
+    [Fact]
+    public void MaxTokens_NeverGoesAboveTheModelsOutputLimit()
+    {
+        GlmDialect.MaxTokens(Glm53, 120_000, null, 4096).Should().Be(131_072);
+        GlmDialect.MaxTokens(Glm53, 1_000_000, null, 4096).Should().Be(131_072);
+        GlmDialect.MaxTokens(Glm53, int.MaxValue, new ReasoningOptions { BudgetTokens = int.MaxValue }, 4096).Should().Be(131_072);
+    }
+
+    [Fact]
+    public void ANullModel_IsRefused()
+    {
+        var effort = () => GlmDialect.EffortFor(null!, null);
+        var room = () => GlmDialect.ReasoningHeadroom(null!, null);
+        var max = () => GlmDialect.MaxTokens(null!, null, null, 1);
+
+        effort.Should().Throw<ArgumentNullException>();
+        room.Should().Throw<ArgumentNullException>();
+        max.Should().Throw<ArgumentNullException>();
+    }
+}

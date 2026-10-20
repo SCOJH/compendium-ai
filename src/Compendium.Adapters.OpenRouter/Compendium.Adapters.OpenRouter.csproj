@@ -31,6 +31,8 @@
   <ItemGroup>
     <!-- In-repo abstraction (was a Compendium.Abstractions.AI PackageReference) -->
     <ProjectReference Include="..\Compendium.Abstractions.AI\Compendium.Abstractions.AI.csproj" />
+    <!-- The GLM dialect (no HTTP): how a GLM model OpenRouter routes (z-ai/glm-*) is asked and read. Not the Z.ai adapter. -->
+    <ProjectReference Include="..\Compendium.Adapters.ZAi.Glm\Compendium.Adapters.ZAi.Glm.csproj" />
   </ItemGroup>
 
 </Project>

@@ -38,6 +38,28 @@ internal sealed class OpenRouterCompletionRequest
 
     [JsonPropertyName("stream")]
     public bool Stream { get; set; }
+
+    /// <summary>
+    /// OpenRouter's reasoning control, sent for a GLM model only (<c>effort</c>, <c>exclude</c>); left out otherwise, so
+    /// every other request is the one it was.
+    /// </summary>
+    [JsonPropertyName("reasoning")]
+    public OpenRouterReasoning? Reasoning { get; set; }
+}
+
+/// <summary>
+/// OpenRouter's <c>reasoning</c> request object
+/// (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens.md, read 2026-10-20).
+/// </summary>
+internal sealed class OpenRouterReasoning
+{
+    /// <summary><c>low</c>, <c>high</c> or <c>max</c> for a GLM; left out for the model's default.</summary>
+    [JsonPropertyName("effort")]
+    public string? Effort { get; set; }
+
+    /// <summary><c>true</c>: the model still reasons, but the reasoning is not returned.</summary>
+    [JsonPropertyName("exclude")]
+    public bool? Exclude { get; set; }
 }
 
 /// <summary>
@@ -53,6 +75,17 @@ internal sealed class OpenRouterMessage
 
     [JsonPropertyName("name")]
     public string? Name { get; set; }
+
+    /// <summary>
+    /// On a response: the reasoning text (a string or null), read for a GLM model only. Held as raw JSON so that a model
+    /// that sends anything else there reads as before. Never set on a request.
+    /// </summary>
+    [JsonPropertyName("reasoning")]
+    public JsonElement? Reasoning { get; set; }
+
+    /// <summary>On a response: <c>reasoning_details[]</c>, read for a GLM model when <see cref="Reasoning"/> is absent.</summary>
+    [JsonPropertyName("reasoning_details")]
+    public JsonElement? ReasoningDetails { get; set; }
 }
 
 /// <summary>
@@ -104,6 +137,14 @@ internal sealed class OpenRouterDelta
 
     [JsonPropertyName("content")]
     public string? Content { get; set; }
+
+    /// <summary>The reasoning delta (a string or null), read for a GLM model only; raw JSON, as on the message.</summary>
+    [JsonPropertyName("reasoning")]
+    public JsonElement? Reasoning { get; set; }
+
+    /// <summary><c>reasoning_details[]</c> of the delta, read for a GLM model when <see cref="Reasoning"/> is absent.</summary>
+    [JsonPropertyName("reasoning_details")]
+    public JsonElement? ReasoningDetails { get; set; }
 }
 
 /// <summary>
@@ -119,6 +160,10 @@ internal sealed class OpenRouterUsage
 
     [JsonPropertyName("total_tokens")]
     public int TotalTokens { get; set; }
+
+    /// <summary><c>completion_tokens_details</c> (<c>reasoning_tokens</c>), read for a GLM model only; raw JSON.</summary>
+    [JsonPropertyName("completion_tokens_details")]
+    public JsonElement? CompletionTokensDetails { get; set; }
 }
 
 /// <summary>

@@ -12,6 +12,7 @@ using Compendium.Adapters.Mistral.Http.Models;
 using Compendium.Adapters.Mistral.StructuredOutputs;
 using Compendium.Adapters.Mistral.Tools;
 using Compendium.Adapters.Mistral.Vision;
+using Compendium.Adapters.ZAi.Glm;
 
 namespace Compendium.Adapters.Mistral.Services;
 
@@ -20,6 +21,12 @@ namespace Compendium.Adapters.Mistral.Services;
 /// embeddings, tool calling, structured outputs, and Pixtral vision against Mistral's "la Plateforme" API.
 /// EU-hosted (France) → GDPR-friendly data residency.
 /// </summary>
+/// <remarks>
+/// The GLM models Mistral serves (<c>zai-glm-5-3</c>, <c>zai-glm-latest</c>…) go through the GLM dialect
+/// (<see cref="GlmDialect"/>): their effort on GLM's scale, <c>max_tokens</c> with room for a reasoning they always do, and
+/// their content — always a list of <c>thinking</c> and <c>text</c> chunks, in a stream too — read apart. Every other model
+/// is sent and read exactly as before.
+/// </remarks>
 internal sealed class MistralAIProvider : IAIProvider
 {
     private static readonly HashSet<string> KnownEmbeddingModels = new(StringComparer.OrdinalIgnoreCase)
@@ -65,10 +72,11 @@ internal sealed class MistralAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var glm = GlmDialect.Recognise(model);
+        var apiRequest = MapToApiRequest(request, model, stream: false, glm);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
-            r => Result.Success(MapToCompletionResponse(r, request.Reasoning is { IncludeReasoning: true })),
+            r => Result.Success(MapToCompletionResponse(r, request.Reasoning, glm is not null)),
             error => Result.Failure<CompletionResponse>(error));
     }
 
@@ -80,7 +88,8 @@ internal sealed class MistralAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral streaming chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var glm = GlmDialect.Recognise(model);
+        var apiRequest = MapToApiRequest(request, model, stream: true, glm);
 
         var index = 0;
         await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
@@ -91,7 +100,22 @@ internal sealed class MistralAIProvider : IAIProvider
                 yield break;
             }
 
-            var completionChunk = MapToCompletionChunk(chunk.Value, index++, request.Reasoning is { IncludeReasoning: true });
+            CompletionChunk completionChunk;
+            if (glm is null)
+            {
+                completionChunk = MapToCompletionChunk(chunk.Value, index++, request.Reasoning is { IncludeReasoning: true });
+            }
+            else if (MapToGlmChunk(chunk.Value, index, request.Reasoning) is { } glmChunk)
+            {
+                completionChunk = glmChunk;
+                index++;
+            }
+            else
+            {
+                // A GLM delta with nothing to pass on (an empty first delta, thinking not asked for): skipped.
+                continue;
+            }
+
             yield return Result.Success(completionChunk);
 
             if (completionChunk.IsFinal)
@@ -189,7 +213,7 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    private MistralChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private MistralChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, GlmModel? glm)
     {
         var messages = new List<MistralChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -213,14 +237,20 @@ internal sealed class MistralAIProvider : IAIProvider
             Model = model,
             Messages = messages,
             Temperature = request.Temperature ?? CompletionRequest.FallbackTemperature,
-            MaxTokens = request.MaxTokens ?? _options.DefaultMaxTokens,
+            MaxTokens = glm is null
+                ? request.MaxTokens ?? _options.DefaultMaxTokens
+                : GlmDialect.MaxTokens(glm, request.MaxTokens, request.Reasoning, _options.DefaultMaxTokens),
             TopP = request.TopP,
             Stop = request.StopSequences?.ToList(),
             Stream = stream,
 
             // Mistral's reasoning has one setting that returns the thinking: "high". The sampling parameters stay: a
-            // reasoning model takes them (Magistral recommends 0.7 / 0.95).
-            ReasoningEffort = request.Reasoning is null ? null : "high"
+            // reasoning model takes them (Magistral recommends 0.7 / 0.95). A GLM always returns its thinking, and takes
+            // low / high / max (https://docs.mistral.ai/studio/conversations/reasoning.md, read 2026-10-20): its effort
+            // is the dialect's, none when the caller asks none. No `thinking` field: Mistral has none.
+            ReasoningEffort = glm is null
+                ? request.Reasoning is null ? null : "high"
+                : GlmDialect.EffortFor(glm, request.Reasoning)
         };
 
         ApplyTools(apiRequest, request);
@@ -370,8 +400,9 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    private static CompletionResponse MapToCompletionResponse(MistralChatCompletionResponse apiResponse, bool surfaceReasoning)
+    private static CompletionResponse MapToCompletionResponse(MistralChatCompletionResponse apiResponse, ReasoningOptions? reasoningOptions, bool glm)
     {
+        var surfaceReasoning = reasoningOptions is { IncludeReasoning: true };
         var choice = apiResponse.Choices.FirstOrDefault();
         var message = choice?.Message;
         var content = MaterialiseContent(message?.Content);
@@ -392,8 +423,10 @@ internal sealed class MistralAIProvider : IAIProvider
             Id = apiResponse.Id,
             Model = apiResponse.Model,
             Content = content,
-            Reasoning = surfaceReasoning && reasoning.Length > 0 ? reasoning : null,
-            FinishReason = MapFinishReason(choice?.FinishReason),
+            Reasoning = glm
+                ? GlmDialect.Surface(reasoning, reasoningOptions)
+                : surfaceReasoning && reasoning.Length > 0 ? reasoning : null,
+            FinishReason = glm ? GlmDialect.MapFinishReason(choice?.FinishReason) : MapFinishReason(choice?.FinishReason),
             Usage = new UsageStats
             {
                 PromptTokens = apiResponse.Usage?.PromptTokens ?? 0,
@@ -472,8 +505,13 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    /// <summary>A streamed delta's answer text and thinking text: a string is answer, a list is split by chunk type.</summary>
-    private static (string Content, string? Thinking) SplitDelta(JsonElement? content)
+    /// <summary>
+    /// A streamed delta's answer text and thinking text: a string is answer, a list is split by chunk type. With
+    /// <paramref name="untypedTextIsAnswer"/> (the GLM path), a text part with no <c>type</c> is answer too, as
+    /// <see cref="MaterialiseContent"/> reads it in a response: Mistral's schema gives <c>TextChunk.type</c> the default
+    /// <c>text</c>. Left off for the other models, whose stream is read as before.
+    /// </summary>
+    private static (string Content, string? Thinking) SplitDelta(JsonElement? content, bool untypedTextIsAnswer = false)
     {
         if (content is not { } el)
         {
@@ -491,7 +529,7 @@ internal sealed class MistralAIProvider : IAIProvider
                 {
                     AppendThinking(thinking, part);
                     if (part.ValueKind == JsonValueKind.Object
-                        && part.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "text"
+                        && IsTextPart(part, untypedTextIsAnswer)
                         && part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
                     {
                         answer.Append(text.GetString());
@@ -503,6 +541,11 @@ internal sealed class MistralAIProvider : IAIProvider
                 return (string.Empty, null);
         }
     }
+
+    private static bool IsTextPart(JsonElement part, bool untypedTextIsAnswer) =>
+        part.TryGetProperty("type", out var type)
+            ? type.ValueKind == JsonValueKind.String && type.GetString() == "text"
+            : untypedTextIsAnswer;
 
     private static AgentToolInvocation MapToAgentToolInvocation(MistralToolCall toolCall)
     {
@@ -539,6 +582,24 @@ internal sealed class MistralAIProvider : IAIProvider
         };
     }
 
+    /// <summary>
+    /// A GLM delta: Mistral's chunk lists read apart (thinking, answer — a text part with no <c>type</c> kept), then
+    /// normalised by the dialect, which skips a delta with nothing to pass on.
+    /// </summary>
+    private static CompletionChunk? MapToGlmChunk(MistralStreamChunk chunk, int index, ReasoningOptions? reasoning)
+    {
+        var choice = chunk.Choices.FirstOrDefault();
+        var (content, thinking) = SplitDelta(choice?.Delta?.Content, untypedTextIsAnswer: true);
+        var usage = chunk.Usage != null
+            ? new UsageStats
+            {
+                PromptTokens = chunk.Usage.PromptTokens,
+                CompletionTokens = chunk.Usage.CompletionTokens
+            }
+            : null;
+        return GlmDialect.Chunk(chunk.Id, index, content, thinking, choice?.FinishReason, usage, reasoning);
+    }
+
     private static FinishReason MapFinishReason(string? reason) => reason?.ToLowerInvariant() switch
     {
         "stop" => FinishReason.Stop,
@@ -559,7 +620,7 @@ internal sealed class MistralAIProvider : IAIProvider
         var supportsCode = KnownCodeModels.Contains(model.Id)
             || model.Id.Contains("codestral", StringComparison.OrdinalIgnoreCase);
 
-        return new AIModel
+        var listed = new AIModel
         {
             Id = model.Id,
             Name = model.Id,
@@ -572,5 +633,8 @@ internal sealed class MistralAIProvider : IAIProvider
                 ? new Dictionary<string, object> { ["specialty"] = "code" }
                 : null
         };
+
+        // A GLM gets what its family knows (context window, output limit, that it always reasons); the others, nothing.
+        return GlmDialect.Recognise(model.Id) is { } glm ? GlmDialect.Describe(listed, glm) : listed;
     }
 }

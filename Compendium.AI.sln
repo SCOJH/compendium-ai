@@ -71,6 +71,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.Ollama.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.OpenAI.IntegrationTests", "tests\Integration\Compendium.Adapters.OpenAI.IntegrationTests\Compendium.Adapters.OpenAI.IntegrationTests.csproj", "{0169F79A-9610-421D-9D42-38E504D058E5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZAi.Glm", "src\Compendium.Adapters.ZAi.Glm\Compendium.Adapters.ZAi.Glm.csproj", "{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZAi.Glm.Tests", "tests\Unit\Compendium.Adapters.ZAi.Glm.Tests\Compendium.Adapters.ZAi.Glm.Tests.csproj", "{A10EBBDB-04CE-4B7A-916C-51C165E2B000}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -200,6 +204,14 @@ Global
 		{0169F79A-9610-421D-9D42-38E504D058E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0169F79A-9610-421D-9D42-38E504D058E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0169F79A-9610-421D-9D42-38E504D058E5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A10EBBDB-04CE-4B7A-916C-51C165E2B000}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A10EBBDB-04CE-4B7A-916C-51C165E2B000}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A10EBBDB-04CE-4B7A-916C-51C165E2B000}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A10EBBDB-04CE-4B7A-916C-51C165E2B000}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{62070182-F02C-4AC4-9729-3CD517145408} = {D5280E11-41BB-435D-993D-B61E46B61922}
@@ -234,5 +246,7 @@ Global
 		{EC41C01D-48AC-4D35-B224-CE0D1A0FB187} = {8E40E955-B65A-4E83-9D9C-A35CB0CE3712}
 		{B1E1F39A-258E-4E1D-B9C8-34ED83465340} = {8E40E955-B65A-4E83-9D9C-A35CB0CE3712}
 		{0169F79A-9610-421D-9D42-38E504D058E5} = {8E40E955-B65A-4E83-9D9C-A35CB0CE3712}
+		{A876E3BC-CF72-41DB-A5AC-6E1BCC4E2865} = {D5280E11-41BB-435D-993D-B61E46B61922}
+		{A10EBBDB-04CE-4B7A-916C-51C165E2B000} = {F3DEE256-1951-47C9-9528-D446CA56F260}
 	EndGlobalSection
 EndGlobal
