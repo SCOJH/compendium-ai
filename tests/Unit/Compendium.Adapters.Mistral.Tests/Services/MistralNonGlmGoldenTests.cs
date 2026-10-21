@@ -154,8 +154,10 @@ public class MistralNonGlmGoldenTests
 
     private const string ToolsRequest =
         """{"model":"mistral-large-latest","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"Hi"},{"role":"assistant","content":"Yes?"},{"role":"user","content":"Find x","name":"alice"}],"temperature":0.4,"max_tokens":512,"top_p":0.9,"stop":["\u003C/tool_call\u003E"],"stream":false,"tools":[{"type":"function","function":{"name":"search","description":"Searches.","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}}],"tool_choice":"any"}""";
+    // The one golden native tool calls moved: the response carries tool_calls, so it now also reads them into
+    // CompletionResponse.ToolCalls, with their ids. Every other byte is the same, Metadata's mistral.tool_calls included.
     private const string ToolsResponse =
-        """{"Id":"c1","Model":"mistral-large-latest","Content":"Calling it.","FinishReason":"ToolCall","Reasoning":null,"Usage":{"PromptTokens":40,"CompletionTokens":12,"TotalTokens":52,"ReasoningTokens":null,"EstimatedCostUsd":null},"CreatedAt":"2026-09-21T14:13:20Z","Metadata":{"mistral.tool_calls":[{"ToolName":"search","ArgumentsJson":"{\u0022q\u0022:\u0022x\u0022}","ResultText":"","IsError":false,"Latency":"00:00:00"}]}}""";
+        """{"Id":"c1","Model":"mistral-large-latest","Content":"Calling it.","FinishReason":"ToolCall","Reasoning":null,"ToolCalls":[{"Id":"t1","Name":"search","ArgumentsJson":"{\u0022q\u0022:\u0022x\u0022}"}],"Usage":{"PromptTokens":40,"CompletionTokens":12,"TotalTokens":52,"ReasoningTokens":null,"EstimatedCostUsd":null},"CreatedAt":"2026-09-21T14:13:20Z","Metadata":{"mistral.tool_calls":[{"ToolName":"search","ArgumentsJson":"{\u0022q\u0022:\u0022x\u0022}","ResultText":"","IsError":false,"Latency":"00:00:00"}]}}""";
     private const string ReasoningRequest =
         """{"model":"magistral-medium-latest","messages":[{"role":"user","content":"Hello"}],"temperature":0.7,"max_tokens":4096,"stream":false,"reasoning_effort":"high"}""";
     private const string ReasoningResponse =

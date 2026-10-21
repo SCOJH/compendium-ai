@@ -125,4 +125,40 @@ public class MistralToolCallingExtensionsTests
         // Assert
         calls.Should().BeEmpty();
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WithParallelToolCalls_StoresTheValue_AndKeepsTheOtherParameters(bool allowed)
+    {
+        // Arrange
+        var tools = new List<AgentTool> { new("foo", "bar") };
+        var request = new CompletionRequest
+        {
+            Model = "m",
+            Messages = new List<Message> { Message.User("hi") }
+        }.WithTools(tools, "auto");
+
+        // Act
+        var updated = request.WithParallelToolCalls(allowed);
+
+        // Assert
+        updated.AdditionalParameters![MistralToolCallingExtensions.ParallelToolCallsKey].Should().Be(allowed);
+        updated.AdditionalParameters[MistralToolCallingExtensions.ToolsKey].Should().BeSameAs(tools);
+        updated.AdditionalParameters[MistralToolCallingExtensions.ToolChoiceKey].Should().Be("auto");
+        request.AdditionalParameters!.Should().NotContainKey(MistralToolCallingExtensions.ParallelToolCallsKey, "the request is cloned");
+    }
+
+    [Fact]
+    public void WithParallelToolCalls_NullRequest_Throws()
+    {
+        // Arrange
+        CompletionRequest? request = null;
+
+        // Act
+        var act = () => request!.WithParallelToolCalls(false);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
 }

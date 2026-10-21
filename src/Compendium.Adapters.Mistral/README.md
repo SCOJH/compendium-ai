@@ -174,6 +174,25 @@ foreach (var call in result.Value.GetToolCalls())
 
 Tool definitions are serialised into Mistral's `tools[]` array; the assistant's `tool_calls` are surfaced as `IReadOnlyList<AgentToolInvocation>` via `CompletionResponse.GetToolCalls()`.
 
+#### Native tool calls, with their ids, in a stream too
+
+The calls also come back as the abstraction's `ToolCall` (`Id`, `Name`, `ArgumentsJson`): in `CompletionResponse.ToolCalls`,
+and on the final chunk of a stream (`CompletionChunk.ToolCalls`, with `FinishReason.ToolCall`). A stream's `tool_calls`
+deltas are put together: a call whole in one delta (what Mistral usually sends) or in pieces, several calls, arguments
+as a string or an object. To continue, send the turn back, then one result per call:
+
+```csharp
+conversation.Add(Message.Assistant(text, calls));              // → {"role":"assistant","content":…,"tool_calls":[…]}
+conversation.Add(Message.ToolResult(calls[0].Id, resultJson)); // → {"role":"tool","content":…,"name":…,"tool_call_id":…}
+```
+
+Mistral may call several tools in one turn, and each call needs its own result. To get one call at most per turn, add
+`.WithParallelToolCalls(false)` (Mistral's `parallel_tool_calls`); without it, the field is not sent.
+
+The tool message's `name` is the called tool's, taken from the call in the conversation unless the message sets `Name`.
+Send the ids back exactly as Mistral gave them (nine letters and digits, such as `D681PevKs` in its guide): an id it
+did not give can be refused. A conversation without these fields is sent exactly as before.
+
 > **Mistral specifics:** Mistral uses `"any"` (not `"required"`) to force the model to emit a tool call. The adapter passes the value verbatim.
 
 ### Structured outputs
