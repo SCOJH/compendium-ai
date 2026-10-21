@@ -40,6 +40,13 @@ internal sealed class MistralChatCompletionRequest
     [JsonPropertyName("tool_choice")]
     public object? ToolChoice { get; set; }
 
+    /// <summary>
+    /// <see langword="false"/>: the model calls one tool at most per turn; <see langword="true"/>: it may call several.
+    /// Left out (the default), Mistral's own default, <see langword="true"/>.
+    /// </summary>
+    [JsonPropertyName("parallel_tool_calls")]
+    public bool? ParallelToolCalls { get; set; }
+
     [JsonPropertyName("response_format")]
     public MistralResponseFormat? ResponseFormat { get; set; }
 
@@ -137,6 +144,14 @@ internal sealed class MistralToolCall
 
     [JsonPropertyName("function")]
     public MistralToolCallFunction? Function { get; set; }
+
+    /// <summary>
+    /// The call's place among the calls of one message, in a stream: the deltas that carry pieces of the same call share
+    /// it. Mistral's schema gives it the default 0 (https://docs.mistral.ai/openapi.yaml, <c>ToolCall</c>, read
+    /// 2026-10-21). Never sent: left <see langword="null"/> on the calls the adapter puts on the wire.
+    /// </summary>
+    [JsonPropertyName("index")]
+    public int? Index { get; set; }
 }
 
 internal sealed class MistralToolCallFunction
@@ -144,8 +159,34 @@ internal sealed class MistralToolCallFunction
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The arguments as JSON text. Mistral's schema (<c>FunctionCall.arguments</c>) takes a string or an object: an
+    /// object is read as its JSON text, and the adapter always sends a string.
+    /// </summary>
     [JsonPropertyName("arguments")]
+    [JsonConverter(typeof(MistralArgumentsConverter))]
     public string Arguments { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Reads <c>function.arguments</c> given as a string (its value) or as an object (its JSON text, as written); writes a
+/// string.
+/// </summary>
+internal sealed class MistralArgumentsConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            return reader.GetString() ?? string.Empty;
+        }
+
+        using var document = JsonDocument.ParseValue(ref reader);
+        return document.RootElement.GetRawText();
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value);
 }
 
 /// <summary>
