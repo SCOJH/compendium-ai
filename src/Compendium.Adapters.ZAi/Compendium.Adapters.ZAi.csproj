@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Compendium.Adapters.ZAi</AssemblyName>
+    <RootNamespace>Compendium.Adapters.ZAi</RootNamespace>
+    <PackageId>Compendium.Adapters.ZAi</PackageId>
+    <Description>Z.ai direct API adapter for Compendium Framework. Implements IAIProvider against Z.ai's OpenAI-compatible chat completions API (GLM 5.3, 5.2, 5.1, 5, 4.7, 4.6): streaming, reasoning (thinking, reasoning_effort, reasoning_content apart from the answer), native tool calling, usage. Built on the GLM dialect shared with the Mistral and OpenRouter adapters.</Description>
+    <PackageTags>compendium;adapter;zai;glm;ai;llm;reasoning</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compendium framework — consumed as published NuGets per ADR-0006. -->
+    <PackageReference Include="Compendium.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <!-- System.Text.Json comes from the shared framework on both targets (NU1510 on the .NET 10 SDK). -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Compendium.Adapters.ZAi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Compendium.Abstractions.AI\Compendium.Abstractions.AI.csproj" />
+    <!-- The GLM dialect: what a GLM model is and how it is asked; this adapter adds Z.ai's wire format. -->
+    <ProjectReference Include="..\Compendium.Adapters.ZAi.Glm\Compendium.Adapters.ZAi.Glm.csproj" />
+  </ItemGroup>
+
+</Project>

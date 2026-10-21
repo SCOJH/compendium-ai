@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Compendium.Adapters.ZAi.Glm</AssemblyName>
+    <RootNamespace>Compendium.Adapters.ZAi.Glm</RootNamespace>
+    <PackageId>Compendium.Adapters.ZAi.Glm</PackageId>
+    <Description>The GLM dialect of the Compendium AI adapters: recognises a GLM model (Z.ai's open-weight family) whatever the host's prefix, knows its reasoning and limits, shapes the request (reasoning effort, max_tokens with room for the reasoning) and normalises what comes back (the reasoning apart, never in the answer). Pure logic, no HTTP, no endpoint: the Z.ai, Mistral and OpenRouter adapters use it for the GLM models they serve.</Description>
+    <PackageTags>compendium;ai;llm;glm;zai;reasoning;dialect</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The only dependency: the abstraction whose DTOs the dialect reads and builds. No adapter, no HTTP stack. -->
+    <ProjectReference Include="..\Compendium.Abstractions.AI\Compendium.Abstractions.AI.csproj" />
+  </ItemGroup>
+
+</Project>
