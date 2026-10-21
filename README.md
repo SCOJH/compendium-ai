@@ -82,6 +82,45 @@ and response is pinned to the byte by golden tests.
 
 The version is set by the tag (MinVer): this lands with the next `v1.1.0-preview.*` tag (`v1.1.0-preview.5` exists).
 
+## Native tool calls (not released)
+
+A conversation that uses the provider's own tool calling (the request's `tools`) carries its calls in the abstraction:
+
+- `Message.ToolCalls`: the calls an assistant turn made (`ToolCall`: `Id`, `Name`, `ArgumentsJson`);
+- `Message.ToolCallId`: on a `Tool` message, the id of the call whose result its `Content` is;
+- `Message.Assistant(content, toolCalls)` and `Message.ToolResult(toolCallId, content)` build both.
+
+The calls come back in `CompletionResponse.ToolCalls` and, in a stream, on the final `CompletionChunk.ToolCalls`: each
+call is whole there, its arguments joined from every delta that carried a piece. All four properties are optional and
+left out of JSON when `null`. Unset, every request is the one it was.
+
+| Adapter | On the wire |
+|---|---|
+| Mistral | An assistant turn's calls go as `tool_calls`, with the arguments as a string. A tool message goes with `tool_call_id`, plus the called tool's `name` (taken from the call when the message has none), as Mistral's guide shows it. `tool_calls` are read from a response and from a stream, whether a call comes whole in one delta or in pieces: the pieces are grouped by `index`, and a new id starts a new call. The arguments can be a string or an object. `finish_reason: "tool_calls"` → `FinishReason.ToolCall`. `WithParallelToolCalls(false)` sends `parallel_tool_calls: false` (one call at most per turn); without it, the field is not sent. GLM (`zai-glm-*`) takes the same path. |
+| Others | Ignored: the message is sent as before, and no call is read into `ToolCalls`. An adapter's own tool-call metadata (its `GetToolCalls()`, where it has one) is unchanged. |
+
+A conversation in Mistral's native mode:
+
+```csharp
+var request = new CompletionRequest { Model = "mistral-large-latest", Messages = conversation }
+    .WithTools(tools, toolChoice: "auto");
+
+var text = new StringBuilder();
+IReadOnlyList<ToolCall> calls = [];
+await foreach (var chunk in provider.StreamCompleteAsync(request))
+{
+    if (chunk.IsFailure) break;
+    text.Append(chunk.Value.ContentDelta);
+    if (chunk.Value.IsFinal) calls = chunk.Value.ToolCalls ?? [];   // the calls, whole, on the final chunk
+}
+
+conversation.Add(Message.Assistant(text.ToString(), calls));        // the turn, sent back as it came
+foreach (var call in calls)
+{
+    conversation.Add(Message.ToolResult(call.Id, Run(call)));       // one result per call, by its id
+}
+```
+
 ## Releasing
 
 Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 15 packages and publishes to
