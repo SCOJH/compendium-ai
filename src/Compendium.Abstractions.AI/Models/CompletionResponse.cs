@@ -33,6 +33,12 @@ public sealed record CompletionResponse
     public required FinishReason FinishReason { get; init; }
 
     /// <summary>
+    /// Gets the model's reasoning, apart from <see cref="Content"/>, when the provider returned it
+    /// (<see cref="ReasoningOptions"/>); <see langword="null"/> otherwise. Never to be sent back as a conversation turn.
+    /// </summary>
+    public string? Reasoning { get; init; }
+
+    /// <summary>
     /// Gets the usage statistics for this completion.
     /// </summary>
     public required UsageStats Usage { get; init; }
@@ -59,9 +65,15 @@ public sealed record CompletionChunk
     public required string Id { get; init; }
 
     /// <summary>
-    /// Gets the content delta for this chunk.
+    /// Gets the content delta for this chunk: the answer only (empty on a chunk that carries reasoning).
     /// </summary>
     public required string ContentDelta { get; init; }
+
+    /// <summary>
+    /// Gets a fragment of the model's reasoning, apart from the answer, when the provider streams it
+    /// (<see cref="ReasoningOptions"/>); <see langword="null"/> otherwise. Never to be sent back as a conversation turn.
+    /// </summary>
+    public string? ReasoningDelta { get; init; }
 
     /// <summary>
     /// Gets the index of this chunk in the stream.
@@ -103,6 +115,12 @@ public sealed record UsageStats
     /// Gets the total number of tokens used.
     /// </summary>
     public int TotalTokens => PromptTokens + CompletionTokens;
+
+    /// <summary>
+    /// Gets the completion tokens spent on reasoning, when the provider says (OpenAI's
+    /// <c>completion_tokens_details.reasoning_tokens</c>); already counted in <see cref="CompletionTokens"/>.
+    /// </summary>
+    public int? ReasoningTokens { get; init; }
 
     /// <summary>
     /// Gets the estimated cost in USD (if available).
