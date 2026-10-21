@@ -4,7 +4,7 @@ Direct adapter for the **OpenAI REST API** (`https://api.openai.com/v1`) that im
 
 | What | Value |
 |---|---|
-| Target framework | net9.0 |
+| Target framework | net9.0;net10.0 |
 | Abstractions pin | `Compendium.Abstractions.AI` 1.0.1 |
 | HTTP stack | Typed `HttpClient` + `Microsoft.Extensions.Http.Resilience` (standard pipeline) + `System.Text.Json` |
 | Auth | `Authorization: Bearer <ApiKey>`, optional `OpenAI-Organization` / `OpenAI-Project` headers |

@@ -100,6 +100,55 @@ public class AnthropicHttpClientTests
     }
 
     [Fact]
+    public void Constructor_WithWorkspaceId_AddsTheWorkspaceHeader()
+    {
+        // Arrange
+        var (sut, _) = TestFactories.CreateHttpClient(o => o.WorkspaceId = "  " + TestFactories.WorkspaceId + " ");
+
+        // Act
+        var headers = GetUnderlyingHttpClient(sut).DefaultRequestHeaders;
+
+        // Assert
+        headers.GetValues("anthropic-workspace-id").Should().ContainSingle().Which.Should().Be(TestFactories.WorkspaceId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void Constructor_WithoutWorkspaceId_SendsNoWorkspaceHeader(string? workspaceId)
+    {
+        // Arrange
+        var (sut, _) = TestFactories.CreateHttpClient(o => o.WorkspaceId = workspaceId);
+
+        // Act
+        var headers = GetUnderlyingHttpClient(sut).DefaultRequestHeaders;
+
+        // Assert
+        headers.Contains("anthropic-workspace-id").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Constructor_WhenWorkspaceHeaderAlreadyPresent_DoesNotDuplicate()
+    {
+        // Arrange — the DI factory has already put the header on the client.
+        var handler = new MockHttpMessageHandler();
+        var options = TestFactories.DefaultOptions(o => o.WorkspaceId = TestFactories.WorkspaceId);
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri(options.BaseUrl) };
+        httpClient.DefaultRequestHeaders.Add("anthropic-workspace-id", TestFactories.WorkspaceId);
+
+        // Act
+        _ = new AnthropicHttpClient(
+            httpClient,
+            Options.Create(options),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AnthropicHttpClient>.Instance);
+
+        // Assert
+        httpClient.DefaultRequestHeaders.GetValues("anthropic-workspace-id")
+            .Should().ContainSingle().Which.Should().Be(TestFactories.WorkspaceId);
+    }
+
+    [Fact]
     public async Task CreateMessageAsync_OnSuccess_ReturnsDeserializedResponse()
     {
         // Arrange

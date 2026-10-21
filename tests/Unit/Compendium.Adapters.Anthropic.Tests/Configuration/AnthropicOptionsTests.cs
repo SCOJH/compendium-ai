@@ -24,6 +24,7 @@ public class AnthropicOptionsTests
         options.TimeoutSeconds.Should().Be(120);
         options.EnableLogging.Should().BeFalse();
         options.EnablePromptCaching.Should().BeFalse();
+        options.WorkspaceId.Should().BeNull();
     }
 
     [Fact]

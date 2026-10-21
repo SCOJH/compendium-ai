@@ -15,6 +15,12 @@ updates:
       compendium-framework:
         patterns:
           - "Compendium.*"
+    # NET10-01: Directory.Packages.props pins Microsoft.Extensions.* once per target
+    # (9.0.x for net9.0, 10.0.x for net10.0). A semver-major update would move the
+    # net9.0 line onto the .NET 10 packages; patch and minor updates keep flowing.
+    ignore:
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

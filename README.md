@@ -46,6 +46,10 @@ tests/Integration/*                 # integration tests (network/Docker-gated, e
 
 ## Build & test
 
+Every package targets `net9.0` and `net10.0` (NET10-01; `net9.0` stays until .NET 9 leaves support on
+2026-11-10). Building needs the .NET 10 SDK (`global.json`); running the `net9.0` half of the tests also
+needs the .NET 9 runtime, which the .NET 9 SDK brings — the CI installs both.
+
 ```bash
 dotnet restore
 dotnet build -c Release
@@ -83,6 +87,8 @@ The version is set by the tag (MinVer): this lands with the next `v1.1.0-preview
 Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 15 packages and publishes to
 GitHub Packages (primary feed), then to nuget.org (Trusted Publishing, or `NUGET_API_KEY`): with neither
 credential that step fails the run, after the GitHub Packages push.
+
+Record the release in [`CHANGELOG.md`](CHANGELOG.md) before tagging.
 
 ## Provenance
 

@@ -35,7 +35,7 @@ This package continues the version sequence of `Compendium.Adapters.OpenRouter` 
 
 | Aspect | Choice |
 |---|---|
-| Target | .NET 9, C# 13 |
+| Target | .NET 9 and .NET 10 (`net9.0;net10.0`), C# 13 |
 | Test framework | xUnit 2.9.3 + FluentAssertions 6.12.1 + NSubstitute 5.1.0 |
 | Coverage | currently **98.77 %** line / 93.23 % branch (63 tests) — gate at 90 % |
 | HTTP mocking | `RichardSzalay.MockHttp` 7.0.0 |

@@ -104,6 +104,63 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddCompendiumAnthropic_WithWorkspaceId_PutsTheHeaderOnTheFactoryClient()
+    {
+        // Arrange
+        var services = BuildServices();
+        services.AddCompendiumAnthropic(o =>
+        {
+            o.ApiKey = "sk-ant";
+            o.WorkspaceId = " wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ ";
+        });
+        var sp = services.BuildServiceProvider();
+
+        // Act — the named client of the factory, without the typed client's own header logic.
+        var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("AnthropicHttpClient");
+
+        // Assert
+        client.DefaultRequestHeaders.GetValues("anthropic-workspace-id")
+            .Should().ContainSingle().Which.Should().Be("wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ");
+    }
+
+    [Fact]
+    public void AddCompendiumAnthropic_WithoutWorkspaceId_PutsNoWorkspaceHeaderOnTheFactoryClient()
+    {
+        // Arrange
+        var services = BuildServices();
+        services.AddCompendiumAnthropic(o => o.ApiKey = "sk-ant");
+        var sp = services.BuildServiceProvider();
+
+        // Act
+        var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("AnthropicHttpClient");
+
+        // Assert
+        client.DefaultRequestHeaders.Contains("anthropic-workspace-id").Should().BeFalse();
+    }
+
+    [Fact]
+    public void AddCompendiumAnthropic_WithConfiguration_BindsWorkspaceId()
+    {
+        // Arrange
+        var services = BuildServices();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Anthropic:ApiKey"] = "sk-bound",
+                ["Anthropic:WorkspaceId"] = "wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ",
+            })
+            .Build();
+
+        // Act
+        services.AddCompendiumAnthropic(config);
+        var sp = services.BuildServiceProvider();
+
+        // Assert
+        sp.GetRequiredService<IOptions<AnthropicOptions>>().Value.WorkspaceId
+            .Should().Be("wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ");
+    }
+
+    [Fact]
     public void AddCompendiumAnthropic_ReturnsServiceCollectionForChaining()
     {
         // Arrange

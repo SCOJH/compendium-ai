@@ -46,6 +46,15 @@ public sealed class AnthropicOptions
     public string AnthropicVersion { get; set; } = DefaultAnthropicVersion;
 
     /// <summary>
+    /// Gets or sets the Anthropic workspace the requests act in, sent as the <c>anthropic-workspace-id</c> header on every
+    /// request when set (for example <c>wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ</c>). Required by a key that can act on more than
+    /// one workspace (a personal or service-account key not scoped to one workspace); leave it null for a key that belongs
+    /// to a single workspace — if sent, it must match that workspace. See
+    /// <see href="https://platform.claude.com/docs/en/manage-claude/authentication#select-a-workspace"/>.
+    /// </summary>
+    public string? WorkspaceId { get; set; }
+
+    /// <summary>
     /// Gets or sets the default model id used when <see cref="CompletionRequest.Model"/>
     /// is not specified. Defaults to <c>claude-3-7-sonnet-latest</c>.
     /// </summary>
