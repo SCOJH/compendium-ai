@@ -19,7 +19,7 @@
   <!-- Production runtime — the packages that are not versioned with the .NET runtime
        (union of the 12 source adapter repos; conflicts resolved highest-wins). -->
   <ItemGroup>
-    <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
+    <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.101.13" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
     <!-- dotnet/extensions, not the runtime: one version for both targets. Its net9.0 and
          net10.0 dependency groups each ask for the Microsoft.Extensions.* line of their
