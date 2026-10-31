@@ -1,7 +1,7 @@
 # Compendium AI Domain
 
 The **ai** domain repo of the Compendium framework (repo-per-domain topology, ADR-0007). It hosts the
-`Compendium.Abstractions.AI` abstraction, all 13 AI provider adapters and the GLM dialect they share in a single
+`Compendium.Abstractions.AI` abstraction, all 14 AI provider adapters and the GLM dialect they share in a single
 repository, so a change to the abstraction and its adapters ships as **one atomic PR** and **one release tag**.
 
 - **Framework base packages** (`Compendium.Core`, `Compendium.Abstractions`) are consumed as published
@@ -19,6 +19,7 @@ repository, so a change to the abstraction and its adapters ships as **one atomi
 | `Compendium.Adapters.Anthropic` | Anthropic Messages API (Claude family) — streaming SSE, error mapping, prompt caching. |
 | `Compendium.Adapters.AzureOpenAI` | Azure OpenAI Service — Entra ID / DefaultAzureCredential and API-key auth. |
 | `Compendium.Adapters.Bedrock` | AWS Bedrock via the unified Converse API — Claude, Llama, Mistral, Nova, Titan, Cohere Embed. |
+| `Compendium.Adapters.Cohere` | Cohere's Rerank API (`/v2/rerank`) — an `IReranker`, batched and bounded in flight. |
 | `Compendium.Adapters.DeepSeek` | DeepSeek direct API (OpenAI-compatible) — chat + reasoning models. |
 | `Compendium.Adapters.Gemini` | Google Gemini REST API — chat, streaming, tools, embeddings. |
 | `Compendium.Adapters.HuggingFace` | Hugging Face Inference Endpoints + Serverless Inference API; an `IReranker` over Text Embeddings Inference's `/rerank`. |
@@ -159,7 +160,7 @@ guide wants the word "json" and an example in the prompt; without them the answe
 
 ## Releasing
 
-Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 15 packages and publishes to
+Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 16 packages and publishes to
 GitHub Packages (primary feed), then to nuget.org (Trusted Publishing, or `NUGET_API_KEY`): with neither
 credential that step fails the run, after the GitHub Packages push.
 

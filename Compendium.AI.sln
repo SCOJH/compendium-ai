@@ -79,6 +79,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZAi.Glm
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZAi.Tests", "tests\Unit\Compendium.Adapters.ZAi.Tests\Compendium.Adapters.ZAi.Tests.csproj", "{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.Cohere", "src\Compendium.Adapters.Cohere\Compendium.Adapters.Cohere.csproj", "{EF079810-442A-4D39-9683-AC5E134A5CAE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.Cohere.Tests", "tests\Unit\Compendium.Adapters.Cohere.Tests\Compendium.Adapters.Cohere.Tests.csproj", "{0DF53E76-73AE-4677-BEBA-2122784F723A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -224,6 +228,14 @@ Global
 		{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF079810-442A-4D39-9683-AC5E134A5CAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF079810-442A-4D39-9683-AC5E134A5CAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF079810-442A-4D39-9683-AC5E134A5CAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF079810-442A-4D39-9683-AC5E134A5CAE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{62070182-F02C-4AC4-9729-3CD517145408} = {D5280E11-41BB-435D-993D-B61E46B61922}
@@ -262,5 +274,7 @@ Global
 		{97DB7F72-1598-4C10-A362-32F52ADEDDC0} = {D5280E11-41BB-435D-993D-B61E46B61922}
 		{A10EBBDB-04CE-4B7A-916C-51C165E2B000} = {F3DEE256-1951-47C9-9528-D446CA56F260}
 		{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E} = {F3DEE256-1951-47C9-9528-D446CA56F260}
+		{EF079810-442A-4D39-9683-AC5E134A5CAE} = {D5280E11-41BB-435D-993D-B61E46B61922}
+		{0DF53E76-73AE-4677-BEBA-2122784F723A} = {F3DEE256-1951-47C9-9528-D446CA56F260}
 	EndGlobalSection
 EndGlobal
