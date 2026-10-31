@@ -84,6 +84,44 @@ For **embeddings**, `BAAI/bge-large-en-v1.5` (general English) and `sentence-tra
 
 Tool calling is **best-effort**. The OpenAI-compatible `tools` + `tool_choice` body fields are passed through unchanged, and modern TGI-backed endpoints (Llama-3.1+, Qwen-2.5+, Mistral instruct families) generally honor them. **Non-TGI endpoints** (vision, audio, classification, older runtimes) silently ignore the fields and return a plain assistant message. There is no advance signal of capability — defensive consumers should check `response.GetToolCalls().Count > 0` rather than assume.
 
+## Reranking with Text Embeddings Inference (`IReranker`)
+
+`AddCompendiumTeiReranker` registers an `IReranker` over a [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference)
+server's `POST /rerank`: a self-hosted or dedicated endpoint that serves one cross-encoder (for instance
+`BAAI/bge-reranker-v2-m3`, multilingual). It is apart from the chat provider above: its own options, its own URL, no HF
+token required.
+
+```csharp
+services.AddCompendiumTeiReranker(opt =>
+{
+    opt.BaseUrl = "http://tei-reranker:8080";   // /rerank is appended
+    opt.ApiKey = null;                           // the server's --api-key, sent as Bearer; unset: no header
+    opt.TimeoutSeconds = 3;                      // the whole call, every batch included
+});
+
+var ranked = await sp.GetRequiredService<IReranker>()
+    .RerankAsync(query, passages, new RerankOptions { TopN = 5, ReturnDocuments = true }, ct);
+// ranked.Value: by descending relevance (0 to 1), each with its Index in `passages`.
+```
+
+| Option (`TeiReranker` section) | Default | Meaning |
+|---|---|---|
+| `BaseUrl` | — | The server's URL. Required. |
+| `ApiKey` | none | The server's `--api-key`, sent as `Authorization: Bearer`. |
+| `Truncate` | `true` | TEI cuts a pair longer than the model takes, rather than answering 422. |
+| `TruncationDirection` | `Right` | Which end TEI cuts. |
+| `MaxBatchSize` | `32` | Documents per request; more go in several, sent together, and are merged. TEI refuses more than its `--max-client-batch-size` (32 by default) with a 422: raise both together. |
+| `TimeoutSeconds` | `10` | The call's budget; past it, `AI.RerankFailed`. |
+
+- On the wire: `{"query", "texts", "raw_scores": false, "return_text": false, "truncate", "truncation_direction"}`; TEI
+  answers `[{"index", "score"}]`, the score through a sigmoid (0 to 1). A cross-encoder scores each pair on its own, so
+  batches compare and merge; equal scores keep the input order.
+- `TopN` keeps the best (at least 1); `ReturnDocuments` fills `Document` from your input (the texts do not travel back);
+  `Model` is not sent: the server serves one model. A blank query is `AI.InvalidQuery`; no documents, an empty success.
+- Every failure is a `Result`: a 4xx or 5xx (TEI's `{error, error_type}` in the message), an unreadable answer, an
+  index outside its batch, a transport error or the budget running out is `AI.RerankFailed`. Only your own
+  cancellation throws. No retry handler: on a rerank budget, fall back to the order you have.
+
 ## Production checklist
 
 - **Pin to a dedicated Inference Endpoint** (not serverless) for any user-facing workload.
