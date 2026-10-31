@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <!-- The only dependency: the abstraction whose DTOs the dialect reads and builds. No adapter, no HTTP stack. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <ProjectReference Include="..\Compendium.Abstractions.AI\Compendium.Abstractions.AI.csproj" />
   </ItemGroup>
 
