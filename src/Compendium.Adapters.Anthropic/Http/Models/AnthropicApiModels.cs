@@ -62,11 +62,26 @@ internal sealed class AnthropicThinking
     public string? Display { get; set; }
 }
 
-/// <summary><c>output_config</c>: the effort of an adaptive model (<c>low</c> … <c>max</c>).</summary>
+/// <summary>
+/// <c>output_config</c>: the effort of an adaptive model (<c>low</c> … <c>max</c>), and the JSON Schema the answer follows.
+/// </summary>
 internal sealed class AnthropicOutputConfig
 {
     [JsonPropertyName("effort")]
     public string? Effort { get; set; }
+
+    [JsonPropertyName("format")]
+    public AnthropicOutputFormat? Format { get; set; }
+}
+
+/// <summary><c>output_config.format</c>: <c>{ "type": "json_schema", "schema": { … } }</c>.</summary>
+internal sealed class AnthropicOutputFormat
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "json_schema";
+
+    [JsonPropertyName("schema")]
+    public JsonElement Schema { get; set; }
 }
 
 /// <summary>A system-prompt block. Anthropic accepts either a single string or an array of blocks.</summary>

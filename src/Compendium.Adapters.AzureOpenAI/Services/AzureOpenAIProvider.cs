@@ -60,6 +60,11 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         var deployment = _options.ResolveDeployment(model);
         _logger.LogDebug("Sending Azure OpenAI chat completion to deployment {Deployment} (model {Model})", deployment, model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var apiRequest = MapToApiRequest(request, stream: false);
         var result = await _httpClient.CreateChatCompletionAsync(deployment, apiRequest, cancellationToken);
         return result.Match(
@@ -77,6 +82,12 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         var deployment = _options.ResolveDeployment(model);
         _logger.LogDebug("Sending Azure OpenAI streaming completion to deployment {Deployment} (model {Model})", deployment, model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var apiRequest = MapToApiRequest(request, stream: true);
 
@@ -204,6 +215,13 @@ internal sealed class AzureOpenAIProvider : IAIProvider
 
         return Task.FromResult(Result.Success<IReadOnlyList<AIModel>>(rows));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: a deployment's name does not say its model, and Azure answers a model without
+    /// structured outputs (before GPT-4o 2024-08-06) or an API version before 2024-08-01-preview with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
 
     /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
@@ -344,8 +362,33 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         }
     }
 
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="AzureOpenAIStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
     private void ApplyResponseFormat(AzureOpenAIChatCompletionRequest apiRequest, CompletionRequest request)
     {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            apiRequest.ResponseFormat = new AzureOpenAIResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new AzureOpenAIJsonSchemaFormat
+                {
+                    Name = responseSchema.Name,
+                    Schema = responseSchema.Parse().Value,
+                    Strict = responseSchema.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(AzureOpenAIStructuredOutputExtensions.SchemaKey, out var schemaRaw)

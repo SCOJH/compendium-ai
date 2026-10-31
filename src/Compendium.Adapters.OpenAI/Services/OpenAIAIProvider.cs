@@ -27,6 +27,14 @@ internal sealed class OpenAIAIProvider : IAIProvider
         "text-embedding-ada-002"
     };
 
+    // The models without json_schema: GPT-3.5, GPT-4 and GPT-4 Turbo, the first GPT-4o snapshot, o1-mini, o1-preview,
+    // ChatGPT's own snapshots, and the ones that do not chat.
+    private static readonly string[] NoJsonSchemaPrefixes =
+    {
+        "gpt-3.5", "gpt-4-", "gpt-4o-2024-05-13", "o1-mini", "o1-preview", "chatgpt-", "text-", "davinci", "babbage",
+        "whisper", "tts-", "dall-e", "omni-moderation"
+    };
+
     private readonly OpenAIHttpClient _httpClient;
     private readonly OpenAIOptions _options;
     private readonly ILogger<OpenAIAIProvider> _logger;
@@ -52,6 +60,11 @@ internal sealed class OpenAIAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending OpenAI chat completion to model {Model}", model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var apiRequest = MapToApiRequest(request, model, stream: false);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
@@ -66,6 +79,12 @@ internal sealed class OpenAIAIProvider : IAIProvider
     {
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending OpenAI streaming chat completion to model {Model}", model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var apiRequest = MapToApiRequest(request, model, stream: true);
 
@@ -164,6 +183,15 @@ internal sealed class OpenAIAIProvider : IAIProvider
             apiModels => Result.Success<IReadOnlyList<AIModel>>(apiModels.Select(MapToAIModel).ToList()),
             error => Result.Failure<IReadOnlyList<AIModel>>(error));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Every chat model from GPT-4o (2024-08-06) and GPT-4o mini on, the o-series from o1, GPT-4.1 and GPT-5; not GPT-3.5,
+    /// GPT-4 and GPT-4 Turbo, the first GPT-4o snapshot (2024-05-13), o1-mini, o1-preview, nor <c>chatgpt-*</c>. An empty
+    /// id is the default model.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) =>
+        TakesJsonSchema(string.IsNullOrEmpty(model) ? _options.DefaultModel : model);
 
     /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
@@ -290,8 +318,48 @@ internal sealed class OpenAIAIProvider : IAIProvider
         }
     }
 
+    private static bool TakesJsonSchema(string model) =>
+        !string.IsNullOrWhiteSpace(model)
+        && !KnownEmbeddingModels.Contains(model)
+        && !string.Equals(model, "gpt-4", StringComparison.OrdinalIgnoreCase)
+        && !NoJsonSchemaPrefixes.Any(prefix => model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; on a model without it, a warning and
+    /// the request as it was. Then the <see cref="OpenAIStructuredOutputExtensions"/> keys and the default JSON mode, as
+    /// before.
+    /// </summary>
     private void ApplyResponseFormat(OpenAIChatCompletionRequest apiRequest, CompletionRequest request)
     {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            if (SupportsJsonSchema(apiRequest.Model))
+            {
+                apiRequest.ResponseFormat = new OpenAIResponseFormat
+                {
+                    Type = "json_schema",
+                    JsonSchema = new OpenAIJsonSchemaFormat
+                    {
+                        Name = responseSchema.Name,
+                        Schema = responseSchema.Parse().Value,
+                        Strict = responseSchema.Strict
+                    }
+                };
+                return;
+            }
+
+            _logger.LogWarning(
+                "OpenAI does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                apiRequest.Model,
+                responseSchema.Name);
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(OpenAIStructuredOutputExtensions.SchemaKey, out var schemaRaw)

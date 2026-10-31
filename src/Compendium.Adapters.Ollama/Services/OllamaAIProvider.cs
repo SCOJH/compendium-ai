@@ -50,6 +50,11 @@ internal sealed class OllamaAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Ollama chat completion to model {Model}", model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var apiRequest = MapToApiRequest(request, model, stream: false);
 
         var result = await _httpClient.ChatAsync(apiRequest, cancellationToken);
@@ -82,6 +87,12 @@ internal sealed class OllamaAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
 
         _logger.LogDebug("Sending Ollama streaming chat completion to model {Model}", model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var apiRequest = MapToApiRequest(request, model, stream: true);
 
@@ -224,6 +235,13 @@ internal sealed class OllamaAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: Ollama (0.5 and later) constrains any model it serves to the schema given as
+    /// <c>format</c>; an earlier server answers with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -265,8 +283,21 @@ internal sealed class OllamaAIProvider : IAIProvider
         };
 
         ApplyTools(apiRequest, request);
+
+        // ResponseSchema as format: Ollama's grammar constrains the answer to the schema, with or without Strict.
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            apiRequest.Format = responseSchema.Parse().Value;
+        }
+
         return apiRequest;
     }
+
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
 
     private OllamaRequestOptions BuildOptions(CompletionRequest request)
     {

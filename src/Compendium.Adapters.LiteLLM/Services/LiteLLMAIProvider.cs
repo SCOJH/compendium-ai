@@ -45,6 +45,11 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending LiteLLM chat completion to model {Model}", model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var apiRequest = MapToApiRequest(request, model, stream: false);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
@@ -59,6 +64,12 @@ internal sealed class LiteLLMAIProvider : IAIProvider
     {
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending LiteLLM streaming chat completion to model {Model}", model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var apiRequest = MapToApiRequest(request, model, stream: true);
 
@@ -157,6 +168,13 @@ internal sealed class LiteLLMAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: the proxy translates <c>response_format.json_schema</c> for the provider behind the
+    /// model, and answers with its own error where it cannot.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -245,8 +263,33 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         }
     }
 
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="LiteLLMStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
     private void ApplyResponseFormat(LiteLLMChatCompletionRequest apiRequest, CompletionRequest request)
     {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            apiRequest.ResponseFormat = new LiteLLMResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new LiteLLMJsonSchemaFormat
+                {
+                    Name = responseSchema.Name,
+                    Schema = responseSchema.Parse().Value,
+                    Strict = responseSchema.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(LiteLLMStructuredOutputExtensions.SchemaKey, out var schemaRaw)

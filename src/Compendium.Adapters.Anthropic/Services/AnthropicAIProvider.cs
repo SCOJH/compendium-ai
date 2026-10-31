@@ -64,6 +64,11 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Anthropic message request to model {Model}", model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var apiRequest = MapToApiRequest(request, model, stream: false);
         var result = await _httpClient.CreateMessageAsync(apiRequest, cancellationToken);
 
@@ -80,6 +85,12 @@ internal sealed class AnthropicAIProvider : IAIProvider
         var model = string.IsNullOrWhiteSpace(request.Model) ? _options.DefaultModel : request.Model;
 
         _logger.LogDebug("Sending Anthropic streaming message request to model {Model}", model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var apiRequest = MapToApiRequest(request, model, stream: true);
         var surfaceReasoning = request.Reasoning is { IncludeReasoning: true };
@@ -213,6 +224,14 @@ internal sealed class AnthropicAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Claude Sonnet 4.5, Opus 4.5, Haiku 4.5 and every later model, Fable and Mythos included (<c>output_config.format</c>);
+    /// not the 3.x models, Opus 4 and 4.1, nor Sonnet 4. An empty id is the default model.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) =>
+        ClaudeStructuredOutput.Supports(string.IsNullOrWhiteSpace(model) ? _options.DefaultModel : model);
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -314,8 +333,30 @@ internal sealed class AnthropicAIProvider : IAIProvider
             _logger.LogDebug("Model {Model} has no extended thinking: the request is sent without it", model);
         }
 
+        // Structured output, after the reasoning: output_config may already carry its effort.
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            if (ClaudeStructuredOutput.Supports(model))
+            {
+                ClaudeStructuredOutput.Apply(apiRequest, responseSchema.Parse().Value);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Anthropic does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                    model,
+                    responseSchema.Name);
+            }
+        }
+
         return apiRequest;
     }
+
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
 
     private static string? CombineSystemPrompt(string? primary, StringBuilder addendum)
     {
@@ -414,6 +455,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
             SupportsTools = true,
             SupportsEmbeddings = false,
             SupportsVision = info.Capabilities?.ImageInput?.Supported ?? false,
+
             PricingInputPerMillion = null,
             PricingOutputPerMillion = null,
             Metadata = metadata.Count == 0 ? null : metadata,

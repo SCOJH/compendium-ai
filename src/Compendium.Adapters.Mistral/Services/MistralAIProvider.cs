@@ -88,6 +88,11 @@ internal sealed class MistralAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral chat completion to model {Model}", model);
 
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var glm = GlmDialect.Recognise(model);
         var apiRequest = MapToApiRequest(request, model, stream: false, glm);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
@@ -103,6 +108,12 @@ internal sealed class MistralAIProvider : IAIProvider
     {
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral streaming chat completion to model {Model}", model);
+
+        if (InvalidResponseSchema(request, model) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var glm = GlmDialect.Recognise(model);
         var apiRequest = MapToApiRequest(request, model, stream: true, glm);
@@ -251,6 +262,13 @@ internal sealed class MistralAIProvider : IAIProvider
             apiModels => Result.Success<IReadOnlyList<AIModel>>(apiModels.Select(MapToAIModel).ToList()),
             error => Result.Failure<IReadOnlyList<AIModel>>(error));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: Mistral takes a custom JSON schema on its chat models, and answers a model that does
+    /// not chat with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
 
     /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
@@ -447,8 +465,33 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="MistralStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
     private void ApplyResponseFormat(MistralChatCompletionRequest apiRequest, CompletionRequest request)
     {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            apiRequest.ResponseFormat = new MistralResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new MistralJsonSchemaFormat
+                {
+                    Name = responseSchema.Name,
+                    Schema = responseSchema.Parse().Value,
+                    Strict = responseSchema.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(MistralStructuredOutputExtensions.SchemaKey, out var schemaRaw)
