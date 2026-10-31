@@ -21,7 +21,7 @@ repository, so a change to the abstraction and its adapters ships as **one atomi
 | `Compendium.Adapters.Bedrock` | AWS Bedrock via the unified Converse API — Claude, Llama, Mistral, Nova, Titan, Cohere Embed. |
 | `Compendium.Adapters.DeepSeek` | DeepSeek direct API (OpenAI-compatible) — chat + reasoning models. |
 | `Compendium.Adapters.Gemini` | Google Gemini REST API — chat, streaming, tools, embeddings. |
-| `Compendium.Adapters.HuggingFace` | Hugging Face Inference Endpoints + Serverless Inference API. |
+| `Compendium.Adapters.HuggingFace` | Hugging Face Inference Endpoints + Serverless Inference API; an `IReranker` over Text Embeddings Inference's `/rerank`. |
 | `Compendium.Adapters.LiteLLM` | Self-hostable LiteLLM gateway — 100+ providers behind one endpoint. |
 | `Compendium.Adapters.Mercury` | Inception Labs Mercury diffusion LLMs (OpenAI-compatible API). |
 | `Compendium.Adapters.Mistral` | Mistral "la Plateforme" — EU-hosted chat, streaming, embeddings. |
