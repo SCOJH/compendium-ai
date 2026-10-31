@@ -121,6 +121,30 @@ foreach (var call in calls)
 }
 ```
 
+## Structured output (not released)
+
+`CompletionRequest.ResponseSchema` (`ResponseSchema`: `Name`, `SchemaJson`, `Strict`, true by default) asks the provider
+itself to constrain the answer to a JSON Schema. Unset, every request is the one it was. `IAIProvider.SupportsJsonSchema(model)`
+says whether the adapter sends it for that model (a default interface member: `false` for any provider that does not
+say). Where it does, an invalid schema (a name outside `[A-Za-z0-9_-]{1,64}`, JSON that is not an object) fails with
+`AI.InvalidRequest` before any request; where it does not, the request goes without the schema, without an error, and the
+adapter logs a warning: the caller that needs the constraint asks first, and on `false` puts the schema in the prompt
+and checks the answer itself. The answer is still text in `Content` / `ContentDelta`. `ResponseSchema` takes precedence
+over each adapter's own `*StructuredOutputExtensions` keys, which keep their effect when it is unset.
+
+| Adapter | On the wire | `SupportsJsonSchema` |
+|---|---|---|
+| OpenAI | `response_format: {type: "json_schema", json_schema: {name, schema, strict}}` | GPT-4o (2024-08-06) and later, o1, o3, GPT-4.1, GPT-5…; not GPT-3.5, GPT-4 / GPT-4 Turbo, `gpt-4o-2024-05-13`, o1-mini, o1-preview, `chatgpt-*` |
+| Azure OpenAI, Mistral, LiteLLM | the same `response_format.json_schema` | always (a deployment, a Mistral chat model, the proxy: the provider answers the rest) |
+| Gemini | `generationConfig: {responseMimeType: "application/json", responseJsonSchema}` (JSON Schema; `responseSchema` left out) | `gemini-*` from 2.0; not 1.x, `gemini-pro`, Gemma |
+| Ollama | `format: <schema>` | always (Ollama 0.5+) |
+| Anthropic | `output_config.format: {type: "json_schema", schema}`, beside `output_config.effort`; no beta header | Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos |
+| DeepSeek | `response_format: {type: "json_object"}`: JSON mode only, the schema is not sent (warning) | false |
+| Hugging Face, Bedrock, Mercury, OpenRouter, Z.ai | nothing (warning) | false |
+
+Each provider takes its own subset of JSON Schema (Claude refuses numeric and string length bounds, Gemini ignores
+some): one the provider refuses comes back as its error.
+
 ## Releasing
 
 Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 15 packages and publishes to

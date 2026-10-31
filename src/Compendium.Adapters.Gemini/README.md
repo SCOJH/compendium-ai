@@ -160,6 +160,12 @@ request = request.WithJsonMode();
 
 Schema mode sets `responseMimeType: "application/json"` + `responseSchema`. JSON mode sets only the mime type. Globally opt every request into JSON mode with `GeminiOptions.UseStructuredOutputsByDefault = true`.
 
+The provider-agnostic way is `CompletionRequest.ResponseSchema` (`new ResponseSchema { Name = "Weather", SchemaJson = schema }`):
+the same request on every adapter, and `IAIProvider.SupportsJsonSchema(model)` to ask first. Here it goes as
+`responseMimeType: "application/json"` + `responseJsonSchema`, which takes JSON Schema (the key above sends
+`responseSchema`, Gemini's OpenAPI subset), from Gemini 2.0. It takes precedence over the keys above. See the repository
+README, "Structured output".
+
 ### Vision (images & files)
 
 `CompletionRequest` has no first-class image field, so attach a list of pre-built `GeminiPart` entries under the `gemini.vision_parts` key in `AdditionalParameters`:

@@ -9,6 +9,24 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Added
 
+- **Structured output: a JSON Schema on the request, constrained by the provider itself.** All additive and optional in
+  `Compendium.Abstractions.AI`: `CompletionRequest.ResponseSchema` (`ResponseSchema`: `Name`, `SchemaJson`, `Strict`,
+  true by default; `Parse()` checks it), and `IAIProvider.SupportsJsonSchema(model)`, a default interface member that
+  answers `false`, so a provider written before it still compiles and says it cannot. Without `ResponseSchema`, every
+  request is the one it was. Where an adapter sends it, an invalid schema fails with `AI.InvalidRequest` before any
+  request; where it does not, the request goes without it, without an error, and the adapter logs a warning. It takes
+  precedence over the `*StructuredOutputExtensions` keys, unchanged otherwise. Compendium.Adapters.OpenAI,
+  Compendium.Adapters.AzureOpenAI, Compendium.Adapters.Mistral, Compendium.Adapters.LiteLLM:
+  `response_format.json_schema` (`name`, `schema`, `strict`); OpenAI's older models (GPT-3.5, GPT-4 / GPT-4 Turbo,
+  `gpt-4o-2024-05-13`, o1-mini, o1-preview, `chatgpt-*`) get the warning. Compendium.Adapters.Gemini:
+  `responseMimeType: "application/json"` + `responseJsonSchema` (JSON Schema, where the existing key keeps
+  `responseSchema`), from Gemini 2.0; Gemini 1.x, `gemini-pro` and Gemma get the warning. Compendium.Adapters.Ollama:
+  `format` with the schema (the wire field becomes a JSON value; it was never set). Compendium.Adapters.Anthropic:
+  `output_config.format: {type: "json_schema", schema}` beside the reasoning's `output_config.effort`, with no beta
+  header, on Claude 4.5 and later, Fable and Mythos; older models get the warning. Compendium.Adapters.DeepSeek: its JSON
+  mode (`response_format: {type: "json_object"}`) without the schema, and the warning. Compendium.Adapters.HuggingFace,
+  Compendium.Adapters.Bedrock, Compendium.Adapters.Mercury, Compendium.Adapters.OpenRouter, Compendium.Adapters.ZAi: the
+  warning. No model listing changes. (EIS-70, agent-spot/backlog#225)
 - **A reasoning channel: an effort or a budget on the request, the reasoning apart from the answer.** All additive and
   optional in `Compendium.Abstractions.AI`: `CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low · medium ·
   high · xhigh · max, `BudgetTokens`, `IncludeReasoning`, true by default), `CompletionChunk.ReasoningDelta`,
