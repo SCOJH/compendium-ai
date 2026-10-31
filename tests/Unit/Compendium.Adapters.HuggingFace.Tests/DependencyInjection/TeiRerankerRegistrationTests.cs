@@ -62,6 +62,51 @@ public class TeiRerankerRegistrationTests
         sp.GetService<IReranker>().Should().NotBeNull();
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("file:///tmp/tei")]
+    [InlineData("tei:8080")]
+    public void AddCompendiumTeiReranker_WithABaseUrlThatCannotServe_FailsAtResolution(string baseUrl)
+    {
+        var services = Services();
+
+        services.AddCompendiumTeiReranker(o => o.BaseUrl = baseUrl);
+        using var sp = services.BuildServiceProvider();
+
+        ((Action)(() => sp.GetRequiredService<IReranker>())).Should().Throw<OptionsValidationException>()
+            .Which.Message.Should().Contain("BaseUrl must be an absolute http or https URL");
+    }
+
+    [Fact]
+    public void AddCompendiumTeiReranker_WithATimeoutOrConcurrencyBelowOne_FailsAtResolution()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TeiReranker:BaseUrl"] = "http://tei:8080",
+                ["TeiReranker:TimeoutSeconds"] = "0",
+            })
+            .Build();
+        var services = Services();
+
+        services.AddCompendiumTeiReranker(configuration);
+        using var sp = services.BuildServiceProvider();
+
+        ((Action)(() => _ = sp.GetRequiredService<IOptions<TeiRerankerOptions>>().Value)).Should().Throw<OptionsValidationException>();
+    }
+
+    [Fact]
+    public void AddCompendiumTeiReranker_ValidatesOnStart()
+    {
+        var services = Services();
+
+        services.AddCompendiumTeiReranker(o => o.BaseUrl = string.Empty);
+        using var sp = services.BuildServiceProvider();
+
+        // What a host runs before it starts.
+        ((Action)(() => sp.GetRequiredService<IStartupValidator>().Validate())).Should().Throw<OptionsValidationException>();
+    }
+
     [Fact]
     public void AddCompendiumTeiReranker_NullArguments_Throw()
     {
@@ -82,13 +127,17 @@ public class TeiRerankerRegistrationTests
         options.Truncate.Should().BeTrue();
         options.TruncationDirection.Should().Be(TeiTruncationDirection.Right);
         options.TimeoutSeconds.Should().Be(10);
+        options.MaxConcurrentBatches.Should().Be(4);
         options.ApiKey.Should().BeNull();
         options.IsValid().Should().BeFalse("there is no base URL");
     }
 
     [Theory]
     [InlineData("http://tei:8080", 32, 10, true)]
+    [InlineData("https://tei.internal", 32, 10, true)]
     [InlineData("not a url", 32, 10, false)]
+    [InlineData("file:///tmp/tei", 32, 10, false)]
+    [InlineData("http://tei:8080", 32, -1, false)]
     [InlineData("http://tei:8080", 0, 10, false)]
     [InlineData("http://tei:8080", 32, 0, false)]
     public void TeiRerankerOptions_IsValid(string baseUrl, int maxBatchSize, int timeoutSeconds, bool expected)

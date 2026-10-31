@@ -18,13 +18,16 @@ namespace Compendium.Adapters.HuggingFace.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// More documents than <see cref="TeiRerankerOptions.MaxBatchSize"/> go in several requests, sent together: a cross-encoder
-/// scores each pair on its own, so the scores of the batches compare, and are merged. Equal scores keep the input order.
+/// More documents than <see cref="TeiRerankerOptions.MaxBatchSize"/> go in several requests, at most
+/// <see cref="TeiRerankerOptions.MaxConcurrentBatches"/> at a time: a cross-encoder scores each pair on its own, so the
+/// scores of the batches compare, and are merged. Equal scores keep the input order. The first batch that fails stops the
+/// others.
 /// </para>
 /// <para>
 /// Every failure is a <see cref="Result"/>, never an exception: a 4xx or 5xx, an unreadable answer, an index outside its
 /// batch, a transport error, or the call running past <see cref="TeiRerankerOptions.TimeoutSeconds"/> is
-/// <c>AI.RerankFailed</c>. Only the caller's own cancellation throws.
+/// <c>AI.RerankFailed</c>, and so is an answer that does not rank every document of its batch exactly once, or options that
+/// cannot serve a request (<see cref="TeiRerankerOptions.IsValid"/>). Only the caller's own cancellation throws.
 /// </para>
 /// <para>
 /// <see cref="RerankOptions.Model"/> is not sent: a TEI server serves one model. <see cref="RerankOptions.ReturnDocuments"/>
@@ -70,24 +73,65 @@ internal sealed class TeiReranker : IReranker
             return Result.Success<IReadOnlyList<RerankedDocument>>(Array.Empty<RerankedDocument>());
         }
 
-        var batchSize = Math.Max(1, _options.MaxBatchSize);
+        if (_options.Problem() is { } problem)
+        {
+            return Result.Failure<IReadOnlyList<RerankedDocument>>(
+                AIErrors.RerankFailed($"the TEI reranker is misconfigured: {problem}"));
+        }
+
+        var batchSize = _options.MaxBatchSize;
+        var batchCount = (documents.Count + batchSize - 1) / batchSize;
         var timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
         _logger.LogDebug(
-            "Reranking {Count} documents with TEI in batches of {BatchSize}",
+            "Reranking {Count} documents with TEI in {Batches} batches of {BatchSize}, {Concurrent} at a time",
             documents.Count,
-            batchSize);
+            batchCount,
+            batchSize,
+            _options.MaxConcurrentBatches);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
 
-        Result<IReadOnlyList<TeiRank>>[] answers;
+        // A failed batch cancels this one, which stops the batches in flight and those still waiting for the gate.
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+        using var gate = new SemaphoreSlim(_options.MaxConcurrentBatches);
+        var answers = new Result<IReadOnlyList<TeiRank>>?[batchCount];
+        var cut = false;
+
+        async Task SendAsync(int b)
+        {
+            await gate.WaitAsync(stop.Token);
+            try
+            {
+                var answer = await _httpClient.RerankAsync(Request(query, documents, b * batchSize, batchSize), stop.Token);
+                answers[b] = answer;
+                if (answer.IsFailure)
+                {
+                    stop.Cancel();
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
         try
         {
-            var batches = Enumerable.Range(0, (documents.Count + batchSize - 1) / batchSize)
-                .Select(b => _httpClient.RerankAsync(Request(query, documents, b * batchSize, batchSize), deadline.Token));
-            answers = await Task.WhenAll(batches);
+            await Task.WhenAll(Enumerable.Range(0, batchCount).Select(SendAsync));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            cut = true;
+        }
+
+        // A failed batch first, however the loop ended (cut short by it, or done); then the deadline.
+        if (answers.FirstOrDefault(a => a is { IsFailure: true }) is { } failed)
+        {
+            return Result.Failure<IReadOnlyList<RerankedDocument>>(failed.Error);
+        }
+
+        if (cut)
         {
             _logger.LogWarning("TEI rerank of {Count} documents ran past {Timeout}", documents.Count, timeout);
             return Result.Failure<IReadOnlyList<RerankedDocument>>(
@@ -95,17 +139,20 @@ internal sealed class TeiReranker : IReranker
         }
 
         var ranked = new List<RerankedDocument>(documents.Count);
-        for (var b = 0; b < answers.Length; b++)
+        for (var b = 0; b < batchCount; b++)
         {
-            if (answers[b].IsFailure)
-            {
-                return Result.Failure<IReadOnlyList<RerankedDocument>>(answers[b].Error);
-            }
-
+            // Every batch ran, and succeeded.
+            var answer = answers[b]!;
             var offset = b * batchSize;
             var length = Math.Min(batchSize, documents.Count - offset);
+            if (answer.Value.Count != length)
+            {
+                return Result.Failure<IReadOnlyList<RerankedDocument>>(AIErrors.RerankFailed(
+                    $"TEI ranked {answer.Value.Count} documents of a batch of {length}"));
+            }
+
             var seen = new HashSet<int>();
-            foreach (var rank in answers[b].Value)
+            foreach (var rank in answer.Value)
             {
                 if (rank.Index < 0 || rank.Index >= length || !seen.Add(rank.Index))
                 {

@@ -66,7 +66,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<TeiRerankerOptions>(configuration.GetSection(TeiRerankerOptions.SectionName));
+        services.AddOptions<TeiRerankerOptions>().Bind(configuration.GetSection(TeiRerankerOptions.SectionName));
         return services.AddCompendiumTeiRerankerCore();
     }
 
@@ -83,7 +83,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
 
-        services.Configure(configure);
+        services.AddOptions<TeiRerankerOptions>().Configure(configure);
         return services.AddCompendiumTeiRerankerCore();
     }
 
@@ -91,6 +91,11 @@ public static class ServiceCollectionExtensions
     // with backoff would only spend the budget. The HTTP timeout is the call's own, as a backstop.
     private static IServiceCollection AddCompendiumTeiRerankerCore(this IServiceCollection services)
     {
+        // A misconfiguration fails the start (or the first resolution), not a rerank.
+        services.AddOptions<TeiRerankerOptions>()
+            .Validate(options => options.IsValid(), TeiRerankerOptions.InvalidMessage)
+            .ValidateOnStart();
+
         services.AddHttpClient<TeiHttpClient>((sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<TeiRerankerOptions>>().Value;

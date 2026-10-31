@@ -132,6 +132,97 @@ public class TeiRerankerTests
         result.Error.Message.Should().Contain(((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task RerankAsync_ManyBatches_KeepsAtMostMaxConcurrentBatchesInFlight(int maxConcurrent)
+    {
+        var handler = new CountingHandler();
+        var sut = Create(handler, o =>
+        {
+            o.MaxBatchSize = 2;
+            o.MaxConcurrentBatches = maxConcurrent;
+        });
+
+        var result = await sut.RerankAsync("q", Enumerable.Range(0, 20).Select(n => $"d{n}").ToList(), All, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().HaveCount(20);
+        handler.Requests.Should().Be(10);
+        handler.MostInFlight.Should().Be(maxConcurrent);
+    }
+
+    [Fact]
+    public async Task RerankAsync_AFailingBatch_StopsTheBatchesInFlightAndThoseNotStarted()
+    {
+        var handler = new FailFirstHandler();
+        var sut = Create(handler, o =>
+        {
+            o.MaxBatchSize = 1;
+            o.MaxConcurrentBatches = 2;
+            o.TimeoutSeconds = 30;
+        });
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await sut.RerankAsync("q", ["fail", "hang", "c", "d", "e"], All, CancellationToken.None);
+
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the hanging batch is cancelled, not waited for");
+        result.Error.Code.Should().Be("AI.RerankFailed");
+        result.Error.Message.Should().Contain("503");
+        handler.HangingCancelled.Should().BeTrue();
+        handler.SentAfterTheStop.Should().Be(0, "no batch is sent after the failure");
+    }
+
+    [Fact]
+    public async Task RerankAsync_AFailingBatch_NeverSendsABatchAfterTheStop()
+    {
+        // Repeated, for the interleavings of the failure, the hanging batch's cancellation and the waiting batches. A batch
+        // that reaches the handler with its token already cancelled is not sent (a real handler refuses it unsent).
+        for (var run = 0; run < 30; run++)
+        {
+            var handler = new FailFirstHandler();
+            var sut = Create(handler, o =>
+            {
+                o.MaxBatchSize = 1;
+                o.MaxConcurrentBatches = 2;
+                o.TimeoutSeconds = 30;
+            });
+
+            var result = await sut.RerankAsync("q", ["fail", "hang", "c", "d", "e", "f"], All, CancellationToken.None);
+
+            result.Error.Message.Should().Contain("503");
+            handler.SentAfterTheStop.Should().Be(0, $"run {run}: no batch is sent once a batch failed");
+        }
+    }
+
+    [Theory]
+    [InlineData("", 32, 4, 10, "BaseUrl")]
+    [InlineData("/rerank-only", 32, 4, 10, "BaseUrl")]
+    [InlineData("file:///tmp/tei", 32, 4, 10, "BaseUrl")]
+    [InlineData("ftp://tei:8080", 32, 4, 10, "BaseUrl")]
+    [InlineData(BaseUrl, 0, 4, 10, "MaxBatchSize")]
+    [InlineData(BaseUrl, 32, 0, 10, "MaxConcurrentBatches")]
+    [InlineData(BaseUrl, 32, 4, 0, "TimeoutSeconds")]
+    [InlineData(BaseUrl, 32, 4, -5, "TimeoutSeconds")]
+    public async Task RerankAsync_OptionsThatCannotServe_AreRerankFailedWithoutARequest(
+        string baseUrl, int maxBatchSize, int maxConcurrent, int timeoutSeconds, string named)
+    {
+        var (sut, handler) = Create(o =>
+        {
+            o.BaseUrl = baseUrl;
+            o.MaxBatchSize = maxBatchSize;
+            o.MaxConcurrentBatches = maxConcurrent;
+            o.TimeoutSeconds = timeoutSeconds;
+        });
+        var bodies = Capture(handler, "[]");
+
+        var result = await sut.RerankAsync("q", ["a"], All, CancellationToken.None);
+
+        result.Error.Code.Should().Be("AI.RerankFailed");
+        result.Error.Message.Should().Contain("misconfigured").And.Contain(named);
+        bodies.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task RerankAsync_TeiErrorBody_IsInTheMessage()
     {
@@ -159,8 +250,8 @@ public class TeiRerankerTests
     }
 
     [Theory]
-    [InlineData("""[{"index":3,"score":0.5}]""")]
-    [InlineData("""[{"index":-1,"score":0.5}]""")]
+    [InlineData("""[{"index":3,"score":0.5},{"index":0,"score":0.4}]""")]
+    [InlineData("""[{"index":-1,"score":0.5},{"index":1,"score":0.4}]""")]
     [InlineData("""[{"index":0,"score":0.5},{"index":0,"score":0.4}]""")]
     public async Task RerankAsync_AnIndexOutsideItsBatchOrTwice_IsRerankFailed(string answer)
     {
@@ -171,6 +262,22 @@ public class TeiRerankerTests
 
         result.Error.Code.Should().Be("AI.RerankFailed");
         result.Error.Message.Should().Contain("index");
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("""[{"index":0,"score":0.5}]""")]
+    [InlineData("""[{"index":0,"score":0.5},{"index":1,"score":0.4},{"index":2,"score":0.3}]""")]
+    public async Task RerankAsync_AnAnswerThatDoesNotRankTheWholeBatch_IsRerankFailed(string answer)
+    {
+        var (sut, handler) = Create();
+        Capture(handler, answer);
+
+        var result = await sut.RerankAsync("q", ["a", "b"], All, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("AI.RerankFailed");
+        result.Error.Message.Should().Contain("of a batch of 2");
     }
 
     [Theory]
@@ -380,6 +487,83 @@ public class TeiRerankerTests
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+    /// <summary>Answers every text after a short wait, and counts the requests in flight at once.</summary>
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        private int _inFlight;
+        private int _mostInFlight;
+        private int _requests;
+
+        public int MostInFlight => _mostInFlight;
+
+        public int Requests => _requests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requests);
+            var now = Interlocked.Increment(ref _inFlight);
+            int seen;
+            while ((seen = _mostInFlight) < now && Interlocked.CompareExchange(ref _mostInFlight, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                await Task.Delay(50, cancellationToken);
+                var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                var count = JsonDocument.Parse(body).RootElement.GetProperty("texts").GetArrayLength();
+                return Json(HttpStatusCode.OK, JsonSerializer.Serialize(Enumerable.Range(0, count).Select(i => new { index = i, score = 0.5 })));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+    }
+
+    /// <summary>Fails the batch "fail" at once, hangs on "hang" until cancelled, answers the others.</summary>
+    private sealed class FailFirstHandler : HttpMessageHandler
+    {
+        private int _sentAfterTheStop;
+        private volatile bool _failed;
+
+        /// <summary>The requests sent, their token live, once "fail" was answered.</summary>
+        public int SentAfterTheStop => _sentAfterTheStop;
+
+        public bool HangingCancelled { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (_failed && !cancellationToken.IsCancellationRequested)
+            {
+                Interlocked.Increment(ref _sentAfterTheStop);
+            }
+
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            if (body.Contains("\"hang\"", StringComparison.Ordinal))
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    HangingCancelled = true;
+                    throw;
+                }
+            }
+
+            if (body.Contains("\"fail\"", StringComparison.Ordinal))
+            {
+                await Task.Delay(100, cancellationToken);
+                _failed = true;
+                return Json(HttpStatusCode.ServiceUnavailable, "");
+            }
+
+            return Json(HttpStatusCode.OK, """[{"index":0,"score":0.5}]""");
+        }
+    }
 
     /// <summary>A server that never answers, until the request is cancelled.</summary>
     private sealed class HangingHandler : HttpMessageHandler

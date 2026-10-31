@@ -16,13 +16,17 @@ public sealed class TeiRerankerOptions
     /// <summary>The configuration section name.</summary>
     public const string SectionName = "TeiReranker";
 
+    /// <summary>The batches in flight at once by default (<see cref="MaxConcurrentBatches"/>).</summary>
+    public const int DefaultMaxConcurrentBatches = 4;
+
     /// <summary>
     /// The batch TEI accepts by default (<c>--max-client-batch-size 32</c>): a larger one is answered with a 422.
     /// </summary>
     public const int DefaultMaxBatchSize = 32;
 
     /// <summary>
-    /// The server's base URL, e.g. <c>http://tei-reranker:8080</c>; <c>/rerank</c> is appended. Required.
+    /// The server's base URL, an absolute <c>http</c> or <c>https</c> URL, e.g. <c>http://tei-reranker:8080</c>;
+    /// <c>/rerank</c> is appended. Required.
     /// </summary>
     public string BaseUrl { get; set; } = string.Empty;
 
@@ -49,6 +53,13 @@ public sealed class TeiRerankerOptions
     public int MaxBatchSize { get; set; } = DefaultMaxBatchSize;
 
     /// <summary>
+    /// The most batches in flight at once. TEI takes one permit per (query, passage) pair from its
+    /// <c>--max-concurrent-requests</c> (512 by default) and answers 429 at once when they run out, so a large rerank does
+    /// not send all its batches together. Default <see cref="DefaultMaxConcurrentBatches"/>.
+    /// </summary>
+    public int MaxConcurrentBatches { get; set; } = DefaultMaxConcurrentBatches;
+
+    /// <summary>
     /// The time one <see cref="IReranker.RerankAsync"/> call may take, every batch included, in seconds; past it, the
     /// call ends with <c>AI.RerankFailed</c>. Default 10.
     /// </summary>
@@ -59,9 +70,38 @@ public sealed class TeiRerankerOptions
     /// </summary>
     public bool EnableLogging { get; set; }
 
-    /// <summary>Whether the options can serve a request: a base URL, a batch of at least one, a timeout.</summary>
-    public bool IsValid() =>
-        Uri.TryCreate(BaseUrl, UriKind.Absolute, out _) && MaxBatchSize >= 1 && TimeoutSeconds >= 1;
+    /// <summary>
+    /// Whether the options can serve a request: an absolute <c>http</c> / <c>https</c> base URL, and
+    /// <see cref="MaxBatchSize"/>, <see cref="MaxConcurrentBatches"/> and <see cref="TimeoutSeconds"/> of at least 1.
+    /// Checked when the reranker is resolved (<c>AddCompendiumTeiReranker</c> validates on start) and again before each
+    /// call.
+    /// </summary>
+    public bool IsValid() => Problem() is null;
+
+    /// <summary>What makes the options unable to serve a request, or <see langword="null"/>.</summary>
+    internal string? Problem()
+    {
+        if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var url) || (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+        {
+            return $"BaseUrl must be an absolute http or https URL, not '{BaseUrl}'";
+        }
+
+        if (MaxBatchSize < 1)
+        {
+            return $"MaxBatchSize must be at least 1, not {MaxBatchSize}";
+        }
+
+        if (MaxConcurrentBatches < 1)
+        {
+            return $"MaxConcurrentBatches must be at least 1, not {MaxConcurrentBatches}";
+        }
+
+        return TimeoutSeconds < 1 ? $"TimeoutSeconds must be at least 1, not {TimeoutSeconds}" : null;
+    }
+
+    /// <summary>The message <c>AddCompendiumTeiReranker</c> fails the start with when <see cref="IsValid"/> is false.</summary>
+    internal const string InvalidMessage =
+        "TeiRerankerOptions: BaseUrl must be an absolute http or https URL, and MaxBatchSize, MaxConcurrentBatches and TimeoutSeconds at least 1.";
 }
 
 /// <summary>Which end of a too-long input TEI cuts (<c>truncation_direction</c>).</summary>
