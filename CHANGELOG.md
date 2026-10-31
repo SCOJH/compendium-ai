@@ -26,13 +26,14 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   `format` with the schema (the wire field becomes a JSON value; it was never set). Compendium.Adapters.Anthropic:
   `output_config.format: {type: "json_schema", schema}` beside the reasoning's `output_config.effort`, with no beta
   header, on Claude 4.5 and later, Fable and Mythos; older models get the warning. Compendium.Adapters.Bedrock: Converse's
-  `outputConfig.textFormat` (`json_schema`, the schema as a JSON string) on the same Claude models, whatever the region
-  prefix; the other models get the warning. Compendium.Adapters.DeepSeek: its JSON mode
+  `outputConfig.textFormat` (`json_schema`, the schema as a JSON string) on the same Claude models, directly or through a
+  cross-Region profile, but not Claude Haiku 4.5 through the India profile (`in.`); the other models get the warning. Compendium.Adapters.DeepSeek: its JSON mode
   (`response_format: {type: "json_object"}`) without the schema, and the warning — the one adapter whose request changes
   without the constraint; without "json" in the prompt the answer can come back blank. Compendium.Adapters.HuggingFace,
   Compendium.Adapters.Mercury, Compendium.Adapters.OpenRouter, Compendium.Adapters.ZAi: the warning. No adapter rewrites
-  the schema: the portable subset (`additionalProperties: false` and every property `required` on each object, no
-  numeric or length bounds) is in the README. No model listing changes. (EIS-70, agent-spot/backlog#225)
+  the schema: what the providers require (`additionalProperties: false` on each object, no numeric or length bounds) and
+  what is recommended so one schema goes everywhere (every property `required`, optional ones as unions with `null`,
+  within Claude's and Bedrock's bound of 16 union-typed properties) is in the README. No model listing changes. (EIS-70, agent-spot/backlog#225)
 - **A reasoning channel: an effort or a budget on the request, the reasoning apart from the answer.** All additive and
   optional in `Compendium.Abstractions.AI`: `CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low · medium ·
   high · xhigh · max, `BudgetTokens`, `IncludeReasoning`, true by default), `CompletionChunk.ReasoningDelta`,

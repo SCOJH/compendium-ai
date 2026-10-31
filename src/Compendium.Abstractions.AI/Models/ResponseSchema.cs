@@ -41,12 +41,19 @@ public sealed partial record ResponseSchema
 
     /// <summary>The JSON Schema, as a JSON object.</summary>
     /// <remarks>
-    /// It goes to the provider as written: no adapter rewrites it. The subset every constraining provider takes: each
-    /// object sets <c>additionalProperties: false</c> and lists every property in <c>required</c> (an optional one is a
-    /// union with <c>null</c>, <c>"type": ["string", "null"]</c>), which OpenAI and Azure OpenAI demand with
-    /// <see cref="Strict"/>, Claude and Bedrock always; and no <c>minimum</c> / <c>maximum</c>, <c>minLength</c> /
-    /// <c>maxLength</c>, which Claude and Bedrock refuse (Gemini ignores the length bounds). Check those in the answer
-    /// instead.
+    /// <para>
+    /// It goes to the provider as written: no adapter rewrites it. Required by the providers: every object sets
+    /// <c>additionalProperties: false</c> (OpenAI and Azure OpenAI with <see cref="Strict"/>, Claude and Bedrock always);
+    /// no <c>minimum</c> / <c>maximum</c>, <c>minLength</c> / <c>maxLength</c> (Claude and Bedrock refuse them, Gemini
+    /// ignores the length bounds: check those in the answer).
+    /// </para>
+    /// <para>
+    /// Recommended, so one schema goes everywhere: every property in <c>required</c>, an optional one written as a union
+    /// with <c>null</c> (<c>"type": ["string", "null"]</c>). OpenAI and Azure OpenAI demand it with
+    /// <see cref="Strict"/>; Claude and Bedrock allow optional properties up to a bound (24 and 12 across the schema).
+    /// Mind that a union counts too: Claude and Bedrock take at most 16 properties typed by a type array or
+    /// <c>anyOf</c>, which the unions with <c>null</c> reach quickly.
+    /// </para>
     /// </remarks>
     public required string SchemaJson { get; init; }
 

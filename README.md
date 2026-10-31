@@ -140,16 +140,19 @@ over each adapter's own `*StructuredOutputExtensions` keys, which keep their eff
 | Ollama | `format: <schema>` | always (Ollama 0.5+) |
 | Anthropic | `output_config.format: {type: "json_schema", schema}`, beside `output_config.effort`; no beta header | Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos |
 | DeepSeek | `response_format: {type: "json_object"}`: JSON mode only, the schema is not sent (warning) | false |
-| Bedrock | `outputConfig.textFormat: {type: "json_schema", structure: {jsonSchema: {name, schema}}}` (the schema as a JSON string) | Claude Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos, whatever the region prefix; the other models, not yet (warning) |
+| Bedrock | `outputConfig.textFormat: {type: "json_schema", structure: {jsonSchema: {name, schema}}}` (the schema as a JSON string) | Claude Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos, directly or through a cross-Region profile — not Haiku 4.5 through the India profile (`in.`); the other models, not yet (warning) |
 | Hugging Face, Mercury, OpenRouter, Z.ai | nothing (warning) | false |
 
 The schema goes to the provider as written: no adapter rewrites it, and one the provider refuses comes back as its
-error. The portable subset: every object sets `additionalProperties: false` and lists every property in `required` (an
-optional one is a union with `null`, `"type": ["string", "null"]`) — OpenAI and Azure OpenAI demand it with `Strict`,
-Claude and Bedrock always — and no `minimum` / `maximum` / `minLength` / `maxLength`, which Claude and Bedrock refuse
-(Gemini ignores the length bounds): check those in the answer. Claude takes no citations and no prefilled assistant
-turn with a schema. Gemini 2.x takes no schema with function calling: on such a request with tools the schema is not
-sent (warning); Gemini 3 takes both.
+error. Required by the providers: every object sets `additionalProperties: false` (OpenAI and Azure OpenAI with
+`Strict`, Claude and Bedrock always), and no `minimum` / `maximum` / `minLength` / `maxLength`, which Claude and Bedrock
+refuse (Gemini ignores the length bounds): check those in the answer. Recommended, so one schema goes everywhere:
+every property in `required`, an optional one written as a union with `null` (`"type": ["string", "null"]`) — OpenAI
+and Azure OpenAI demand it with `Strict`; Claude and Bedrock allow optional properties up to a bound (24 and 12 across
+the schema). A union counts too: Claude and Bedrock take at most 16 properties typed by a type array or `anyOf`, which
+the unions with `null` reach quickly. Claude takes no citations and no prefilled assistant turn with a schema. Gemini 2.x takes no schema with function calling: on such a request with tools the schema is not
+sent (warning); Gemini 3 takes both, and so does a `-latest` alias, which gets the provider's 400 while it still points
+to a 2.5 model.
 
 DeepSeek is the one exception to "not constrained, request unchanged": its JSON mode changes the request. DeepSeek's
 guide wants the word "json" and an example in the prompt; without them the answer can come back blank.
