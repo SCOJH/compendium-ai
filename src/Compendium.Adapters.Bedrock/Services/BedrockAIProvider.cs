@@ -213,8 +213,9 @@ internal sealed class BedrockAIProvider : IAIProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// Claude Sonnet, Opus and Haiku 4.5 and later, Fable and Mythos (<c>outputConfig.textFormat</c>), whatever the region
-    /// prefix; the other models Bedrock serves, not yet. An empty id is the default model.
+    /// Claude Sonnet, Opus and Haiku 4.5 and later, Fable and Mythos (<c>outputConfig.textFormat</c>), directly or through a
+    /// cross-Region profile, except Claude Haiku 4.5 through the India profile (<c>in.</c>); the other models Bedrock
+    /// serves, not yet. An empty id is the default model.
     /// </remarks>
     public bool SupportsJsonSchema(string model) => BedrockStructuredOutput.Supports(ResolveModelId(model));
 

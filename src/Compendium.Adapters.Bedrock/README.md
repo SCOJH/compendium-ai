@@ -167,6 +167,17 @@ confirm model availability with `aws bedrock list-foundation-models`.
 - [ ] **Cap `DefaultMaxTokens`** to avoid runaway costs from misbehaving callers.
 - [ ] **Pin the model id** — Bedrock occasionally retires legacy versions.
 
+## Structured output
+
+`CompletionRequest.ResponseSchema` goes to Converse as `outputConfig.textFormat`
+(`{type: "json_schema", structure: {jsonSchema: {name, schema}}}`, the schema as a JSON string) for Claude Sonnet, Opus
+and Haiku 4.5 and later, Fable and Mythos, directly or through a cross-Region profile — not Claude Haiku 4.5 through the
+India profile (`in.`). Other models get the request without it and a warning; `SupportsJsonSchema(model)` says which.
+The first request with a new schema can take up to about 90 seconds while Bedrock compiles it: keep `Timeout` at 120 s
+or more (its default); the compiled schema is cached for 24 hours. Every object needs `additionalProperties: false`; no
+`minimum` / `maximum` / `minLength` / `maxLength`; at most 12 optional and 16 union-typed properties. Not with citations
+(400). See the repository README, "Structured output".
+
 ## Tool calling & vision
 
 Native Bedrock support for tool calling (`ToolConfiguration`) and vision
