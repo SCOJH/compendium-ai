@@ -189,18 +189,67 @@ public class MistralNativeToolCallTests
     }
 
     [Fact]
-    public async Task AResponse_WithACallThatHasNoArgumentsOrNoId_ReadsAnEmptyObjectAndAnEmptyId()
+    public async Task AResponse_WithACallThatHasNoArgumentsOrNoId_ReadsAnEmptyObjectAndAGeneratedId()
+    {
+        const string reply = """
+            {"id":"r","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+            """;
+
+        var response = await CompleteAsync(reply);
+
+        var call = response.ToolCalls.Should().ContainSingle().Subject;
+        call.Id.Should().MatchRegex("^[A-Za-z0-9]{9}$", "\"null\" is the schema's default, not an id: the adapter gives one in Mistral's format");
+        call.Name.Should().Be("list_transactions");
+        call.ArgumentsJson.Should().Be("{}");
+        (await CompleteAsync(reply)).ToolCalls![0].Id.Should().Be(call.Id, "the same response always gets the same id");
+        Message.ToolResult(call.Id, "[]").ToolCallId.Should().Be(call.Id, "a call with no id can be answered");
+    }
+
+    [Fact]
+    public async Task AResponse_WithSeveralCallsThatHaveNoId_GivesEachItsOwnId_AndTheyGoBackOnTheWire()
     {
         var response = await CompleteAsync("""
             {"id":"r","model":"mistral-large-latest","created":0,
              "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
-               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+               {"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+               {"id":"","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}}]}
             """);
 
-        var call = response.ToolCalls.Should().ContainSingle().Subject;
-        call.Id.Should().BeEmpty("\"null\" is the schema's default, not an id");
-        call.Name.Should().Be("list_transactions");
-        call.ArgumentsJson.Should().Be("{}");
+        var calls = response.ToolCalls!;
+        calls.Should().HaveCount(2);
+        calls.Should().OnlyContain(c => c.Id.Length == 9);
+        calls[0].Id.Should().NotBe(calls[1].Id, "each call is answered by its own id, even two identical calls");
+
+        var sent = await SendAsync(Conversation(
+            Message.User("Weather in Paris, twice?"),
+            Message.Assistant(string.Empty, calls),
+            Message.ToolResult(calls[1].Id, "{\"sky\":\"clear\"}")));
+
+        var messages = sent.GetProperty("messages");
+        messages[1].GetProperty("tool_calls")[1].GetProperty("id").GetString().Should().Be(calls[1].Id);
+        messages[2].GetProperty("tool_call_id").GetString().Should().Be(calls[1].Id);
+        messages[2].GetProperty("name").GetString().Should().Be("get_weather");
+    }
+
+    [Fact]
+    public async Task TwoResponsesWithNoCompletionId_GiveTheSameCallWithNoId_TwoIds()
+    {
+        // The id is derived from the completion's id; without one, two turns that make the same call would share a
+        // tool_call_id. A random part then keeps them apart (determinism is kept only where there is a completion id).
+        const string reply = """
+            {"id":"","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":"{}"}}]}}]}
+            """;
+
+        var first = (await CompleteAsync(reply)).ToolCalls![0].Id;
+        var second = (await CompleteAsync(reply)).ToolCalls![0].Id;
+
+        first.Should().MatchRegex("^[A-Za-z0-9]{9}$");
+        second.Should().MatchRegex("^[A-Za-z0-9]{9}$");
+        second.Should().NotBe(first);
     }
 
     [Fact]
@@ -304,6 +353,252 @@ public class MistralNativeToolCallTests
             options => options.WithStrictOrdering());
     }
 
+    public static TheoryData<string[]> SeveralCallsWithoutTheSecondId => new()
+    {
+        // Under Mistral's default index 0, the second call with no id at all.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0},{"function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""",
+        },
+
+        // The same, with the schema's default id "null", over two deltas.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"null","function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""",
+        },
+
+        // With no index at all.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},{"function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"}}]},"finish_reason":"tool_calls"}]}""",
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(SeveralCallsWithoutTheSecondId))]
+    public async Task AStream_WithASecondCallThatHasNoId_KeepsItApart(string[] deltas)
+    {
+        // A second name where the current call already has one is a second call: its name is kept, and its arguments
+        // are not joined to the first one's.
+        var chunks = await StreamAsync("mistral-large-latest", null, deltas);
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Should().HaveCount(2);
+        calls[0].Should().BeEquivalentTo(new ToolCall { Id = "aaaaaaaa1", Name = "get_weather", ArgumentsJson = "{\"city\":\"Paris\"}" });
+        calls[1].Name.Should().Be("get_time");
+        calls[1].ArgumentsJson.Should().Be("{\"tz\":\"CET\"}");
+        calls[1].Id.Should().MatchRegex("^[A-Za-z0-9]{9}$", "a call with no id gets one, so that its result can answer it");
+    }
+
+    [Fact]
+    public async Task AStream_WithTheSameToolCalledTwiceWithoutIds_KeepsTheCallsApart_OnceTheFirstArgumentsAreWhole()
+    {
+        // The same name again: a continuation while the arguments so far are not whole JSON (the pieces test above),
+        // a new call once they are.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Select(c => c.ArgumentsJson).Should().Equal("{\"city\":\"Paris\"}", "{\"city\":\"Rome\"}");
+        calls.Should().OnlyContain(c => c.Name == "get_weather");
+        calls[0].Id.Should().NotBe(calls[1].Id);
+    }
+
+    [Fact]
+    public async Task AStream_ThatRepeatsTheNameOnEveryPiece_FromAPieceWithNoArguments_KeepsOneCall()
+    {
+        // The name on every piece, the first one with no arguments yet: a repeated name continues the call.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"retrieve_payment_status","arguments":"\"T1001\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        chunks[^1].ToolCalls.Should().BeEquivalentTo(new[] { Call });
+    }
+
+    [Fact]
+    public async Task AStream_WhoseLastDeltaRepeatsTheCallsHeader_DoesNotMakeASecondCall()
+    {
+        // No id anywhere: the header (name, empty arguments), the arguments, then the header again with the finish reason.
+        // The repeated header brings no arguments of its own, so it is the same call, not a second call f({}).
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var call = chunks[^1].ToolCalls.Should().ContainSingle().Subject;
+        call.Name.Should().Be("get_weather");
+        call.ArgumentsJson.Should().Be("{\"city\":\"Paris\"}");
+    }
+
+    [Fact]
+    public async Task AStream_WithTheSameToolCalledTwice_SplitOpenAIStyle_KeepsTheCallsApart()
+    {
+        // No id, one index: the first call whole, its header sent again, then the second call's arguments with no name.
+        // Arguments that open an object after whole JSON start a new call, which takes the name of the last header.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Select(c => c.ArgumentsJson).Should().Equal("{\"city\":\"Paris\"}", "{\"city\":\"Rome\"}");
+        calls.Should().OnlyContain(c => c.Name == "get_weather");
+        calls[0].Id.Should().NotBe(calls[1].Id);
+    }
+
+    [Fact]
+    public async Task AStream_CutByAReadError_EndsWithStreamInterrupted_NotWithAnException()
+    {
+        // The connection drops after the first delta: the read throws (an IOException), and the stream ends with an
+        // error the caller can read, not with the exception out of the iterator.
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var sse = "data: "
+            + """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}"""
+            + "\n\n";
+        handler.When(HttpMethod.Post, "*/chat/completions").Respond(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new CutStream(System.Text.Encoding.UTF8.GetBytes(sse))),
+        });
+
+        var results = new List<Result<CompletionChunk>>();
+        await foreach (var r in sut.StreamCompleteAsync(Conversation(Message.User("Status of transaction T1001?")), CancellationToken.None))
+        {
+            results.Add(r);
+        }
+
+        results.Should().HaveCount(2);
+        results[0].IsSuccess.Should().BeTrue();
+        results[0].Value.ToolCalls.Should().BeNull();
+        results[^1].IsFailure.Should().BeTrue();
+        results[^1].Error.Code.Should().Be(AIErrors.StreamInterrupted().Code);
+    }
+
+    [Fact]
+    public async Task AStream_WhoseArgumentsAreInvalidJson_ContinuesTheCallOnTheSameName()
+    {
+        // Arguments that are not JSON (a model can write them) are never whole: the same name continues the call, and the
+        // arguments are passed on as written.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":,"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        chunks[^1].ToolCalls.Should().ContainSingle().Which.ArgumentsJson.Should().Be("{\"city\":,{\"city\":\"Rome\"}");
+    }
+
+    [Fact]
+    public async Task AStream_GivesACallWithNoId_TheIdTheSameResponseWouldGive()
+    {
+        // The id depends on the completion's id and the call, not on how they were read: a stream and a response that
+        // carry the same completion id and the same call give the same id. (In practice a stream and a response are two
+        // completions, with two ids; this pins that the reading path adds nothing.)
+        var streamed = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"null","function":{"name":"list_transactions","arguments":""},"index":0}]},"finish_reason":"tool_calls"}]}""");
+        var completed = await CompleteAsync("""
+            {"id":"r","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+            """);
+
+        streamed[^1].ToolCalls.Should().ContainSingle().Which.Id.Should().Be(completed.ToolCalls![0].Id);
+    }
+
+    [Theory]
+    [InlineData("mistral-large-latest")]
+    [InlineData("zai-glm-5-3")]
+    public async Task AStream_ThatEndsWithoutAFinishReason_StillEndsWithTheCalls(string model)
+    {
+        // [DONE] comes, but no delta carried a finish_reason: the calls put together go out on a final chunk of their own.
+        var chunks = await StreamAsync(
+            model,
+            null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking."},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": \"T1001\"}"},"index":0}]},"finish_reason":null}]}""");
+
+        var last = chunks[^1];
+        last.IsFinal.Should().BeTrue();
+        last.FinishReason.Should().Be(FinishReason.ToolCall);
+        last.ToolCalls.Should().BeEquivalentTo(new[] { Call });
+        last.ContentDelta.Should().BeEmpty();
+        last.Id.Should().Be("s");
+        last.Index.Should().Be(chunks.Count - 1, "it follows the chunks before it");
+        chunks.Take(chunks.Count - 1).Should().OnlyContain(c => !c.IsFinal && c.ToolCalls == null);
+    }
+
+    [Fact]
+    public async Task AStream_CutBeforeItsEnd_WithCalls_EndsWithStreamInterrupted_NotWithTheCalls()
+    {
+        // No finish_reason and no [DONE]: the connection was cut (a proxy, a server down). The calls may be partial, so
+        // they are not passed on as a finished turn; the stream ends with an error.
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: false,
+            cancelAfter: null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking."},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""");
+
+        results.Should().HaveCount(3, "one chunk per delta, as before, then the error");
+        results.Take(2).Should().OnlyContain(r => r.IsSuccess && !r.Value.IsFinal && r.Value.ToolCalls == null);
+        results[^1].IsFailure.Should().BeTrue();
+        results[^1].Error.Code.Should().Be(AIErrors.StreamInterrupted().Code);
+    }
+
+    [Fact]
+    public async Task AStream_CutBeforeItsEnd_WithoutACall_EndsAsBefore()
+    {
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: false,
+            cancelAfter: null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Paid."},"finish_reason":null}]}""");
+
+        results.Should().ContainSingle().Which.IsSuccess.Should().BeTrue("no call is at stake: the stream ends as it always did");
+    }
+
+    [Fact]
+    public async Task AStream_CancelledMidCall_EndsWithNothingMore()
+    {
+        // The caller cancels after the first chunk; the SSE loop stops without an exception. What was put together so
+        // far is a cut call ({"transaction_id": ), never a final chunk, and the caller asked for nothing more.
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: true,
+            cancelAfter: 1,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\"T1001\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""");
+
+        results.Should().ContainSingle("nothing is passed on once the caller cancelled")
+            .Which.Value.IsFinal.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AStream_ThatEndsWithoutAFinishReasonOrACall_EndsAsBefore()
+    {
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Paid."},"finish_reason":null}]}""");
+
+        chunks.Should().ContainSingle().Which.IsFinal.Should().BeFalse("no call to carry: no chunk is added");
+    }
+
     [Fact]
     public async Task AStream_WithACallThatHasNoArguments_ReadsAnEmptyObject()
     {
@@ -392,6 +687,32 @@ public class MistralNativeToolCallTests
 
         result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Message : null);
         return result.Value;
+    }
+
+    private static async Task<List<Result<CompletionChunk>>> StreamResultsAsync(
+        string model,
+        bool done,
+        int? cancelAfter,
+        params string[] deltas)
+    {
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var sse = string.Concat(deltas.Select(d => "data: " + d + "\n\n")) + (done ? "data: [DONE]\n\n" : string.Empty);
+        handler.When(HttpMethod.Post, "*/chat/completions").Respond("text/event-stream", sse);
+        var request = Conversation(Message.User("Status of transaction T1001?")) with { Model = model };
+        using var cancellation = new CancellationTokenSource();
+
+        var results = new List<Result<CompletionChunk>>();
+        await foreach (var r in sut.StreamCompleteAsync(request, cancellation.Token))
+        {
+            results.Add(r);
+            if (results.Count == cancelAfter)
+            {
+                await cancellation.CancelAsync();
+            }
+        }
+
+        return results;
     }
 
     private static async Task<List<CompletionChunk>> StreamAsync(string model, ReasoningOptions? reasoning, params string[] deltas)

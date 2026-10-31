@@ -7,6 +7,54 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ## [Unreleased]
 
+### Added
+
+- **A reasoning channel: an effort or a budget on the request, the reasoning apart from the answer.** All additive and
+  optional in `Compendium.Abstractions.AI`: `CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low · medium ·
+  high · xhigh · max, `BudgetTokens`, `IncludeReasoning`, true by default), `CompletionChunk.ReasoningDelta`,
+  `CompletionResponse.Reasoning`, `UsageStats.ReasoningTokens`. The reasoning never comes in `Content` /
+  `ContentDelta`, is returned only when asked for, and is never to be sent back as a conversation turn. Without
+  `Reasoning`, every request and result is the one it was. Compendium.Adapters.Anthropic: adaptive thinking
+  (`thinking: {type: "adaptive"}` + `output_config.effort`) on the models that take it, `thinking: {type: "enabled",
+  budget_tokens}` with `max_tokens` raised by the budget on earlier ones, no temperature or top_p with thinking,
+  `thinking_delta` → `ReasoningDelta`, a model's unasked thinking left out. Compendium.Adapters.OpenAI:
+  `reasoning_effort`, `max_completion_tokens` instead of `max_tokens`, no sampling parameters, reasoning tokens
+  reported. Compendium.Adapters.Mistral: `reasoning_effort`, and `thinking` content chunks split into `ReasoningDelta` /
+  `Reasoning` (such a stream used to fail to deserialise). Compendium.Adapters.DeepSeek: `reasoning_content` →
+  `ReasoningDelta` / `Reasoning` when asked for. The other adapters send the request without it. (ASP-36,
+  agent-spot/backlog#36)
+- **A GLM dialect shared by the Z.ai, Mistral and OpenRouter adapters, and a Z.ai adapter.** A GLM model behaves the
+  same whichever host serves it. `Compendium.Adapters.ZAi.Glm` (new, no HTTP, depends on `Compendium.Abstractions.AI`
+  only) recognises a GLM id whatever the host's prefix or suffix (`glm-5.3`, `zai-glm-5-3`, `z-ai/glm-5.3:batch`,
+  `zai-org/GLM-5.3`…), knows each version's capabilities, puts the effort on GLM's scale and gives `max_tokens` room
+  for the reasoning on top of the answer's; the reasoning is read apart, only when asked for, never in `Content` /
+  `ContentDelta`, and GLM's finish reasons are mapped. `Compendium.Adapters.ZAi` (new): an `IAIProvider` for Z.ai's
+  OpenAI-compatible API — `thinking: {type: "enabled"}`, `reasoning_effort`, `reasoning_content` read into
+  `ReasoningDelta` / `Reasoning`, native tool calls (`tool_choice` limited to `auto`, anything else refused before the
+  request is sent), Z.ai's business error codes (429 + 1113 → `InsufficientCredits`), `AddCompendiumZAi`.
+  Compendium.Adapters.Mistral (`zai-glm-*`) and Compendium.Adapters.OpenRouter (`z-ai/glm-*`) send and read GLM models
+  through the dialect: on Mistral, GLM 5.3 gets `low` or `high`, never `max` (Mistral's enum stops at `xhigh`), and a
+  stream's text part with no `type` is kept; on OpenRouter, `reasoning: {effort, exclude}`, `reasoning` /
+  `reasoning_details` read apart and the trailing usage frame read, so the final chunk carries the usage. Every other
+  model is sent and read exactly as before (golden tests pin it to the byte). Design: `docs/adr/0001-glm-dialect.md`.
+  (ZAI-01, agent-spot/backlog#493)
+- **Native tool calls in the abstraction and the Mistral adapter, in a stream too.** All optional and additive in
+  `Compendium.Abstractions.AI`: `ToolCall` (`Id`, `Name`, `ArgumentsJson`), `Message.ToolCalls` (an assistant turn's
+  calls), `Message.ToolCallId` (on a `Tool` message, the call answered), `Message.Assistant(content, toolCalls)` and
+  `Message.ToolResult(toolCallId, content)`, and the calls read back in `CompletionResponse.ToolCalls` and on the final
+  `CompletionChunk.ToolCalls`, each call whole. Unset, every record serialises as before (`WhenWritingNull`).
+  Compendium.Adapters.Mistral sends an assistant turn's calls as `tool_calls` and a tool message as `tool_call_id`
+  (plus the called tool's `name`, as Mistral's guide shows it), reads `tool_calls` from a response and, put together
+  from the deltas, from a stream: grouped by `index`, a new id starting a new call — or, with no id, another tool's
+  name, or arguments that open an object once the call's are whole JSON (a header sent again continues the call) —,
+  the schema's default id `"null"` never taken as an id, a call with no id given one in Mistral's format (derived from
+  the completion, so the same response, read again, gives the same id), a stream that reaches `[DONE]` without a
+  `finish_reason` still ending with its calls, and one cut before `[DONE]` with calls under way ending with the
+  existing `AI.StreamInterrupted` rather than with partial calls. `function.arguments` is read as a string or as an
+  object (an object used to fail the response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The
+  `mistral.tool_calls` metadata is unchanged; the other adapters ignore the new fields. (ALF-22,
+  agent-spot/backlog#510)
+
 ### Changed
 
 - **Every package now targets `net9.0` and `net10.0`.** .NET 9 (STS) leaves support on 2026-11-10; .NET 10 is the
@@ -28,6 +76,9 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Fixed
 
+- Compendium.Adapters.Mistral: a stream whose read fails mid-way (the connection dropped: an `IOException` from the
+  body) now ends with `Result.Failure(AI.StreamInterrupted)`, as Bedrock's does, instead of throwing the exception out
+  of the iterator. Cancellation is unchanged. (ALF-22)
 - Every streaming adapter (the 11 `*HttpClient` SSE / NDJSON read loops, plus Ollama's pull-progress loop): the loop
   now stops when `StreamReader.ReadLineAsync` returns `null` instead of testing `StreamReader.EndOfStream` before each
   read. `EndOfStream` can block the thread synchronously on a network stream while waiting for the next byte; the .NET

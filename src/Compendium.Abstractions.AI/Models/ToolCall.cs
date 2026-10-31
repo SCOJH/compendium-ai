@@ -21,7 +21,9 @@ public sealed record ToolCall
     /// <summary>
     /// Gets the provider's id for this call. The <see cref="MessageRole.Tool"/> message that carries the result names
     /// it in <see cref="Message.ToolCallId"/>. Send it back exactly as received: a provider can refuse an id it did not
-    /// give (Mistral's are nine letters and digits, such as <c>D681PevKs</c> in its guide).
+    /// give (Mistral's are nine letters and digits, such as <c>D681PevKs</c> in its guide). Never empty when an adapter
+    /// reads it: a call the provider sent without an id gets one from the adapter, in the provider's format, so that
+    /// <see cref="Message.ToolResult"/> can answer it.
     /// </summary>
     public required string Id { get; init; }
 

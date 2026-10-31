@@ -30,7 +30,10 @@ namespace Compendium.Adapters.Mistral.Services;
 /// Native tool calls, for every model: an assistant <see cref="Message"/> with <see cref="Message.ToolCalls"/> goes as
 /// <c>tool_calls</c>, a tool message with <see cref="Message.ToolCallId"/> as <c>tool_call_id</c> (and the called tool's
 /// <c>name</c>, as Mistral's guide shows it). The calls come back in <see cref="CompletionResponse.ToolCalls"/> and, put
-/// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/>. A conversation without them is
+/// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/> (a stream that reaches
+/// <c>[DONE]</c> without a <c>finish_reason</c> gets a final chunk of its own for them; one cut before <c>[DONE]</c>, or by
+/// a read error, ends with <see cref="AIErrors.StreamInterrupted"/>, and a cancelled one with nothing more). A call
+/// Mistral sent without an id gets one (<see cref="MistralToolCallAssembler.IdFor"/>). A conversation without them is
 /// sent as before.
 /// </para>
 /// </remarks>
@@ -105,13 +108,20 @@ internal sealed class MistralAIProvider : IAIProvider
         var apiRequest = MapToApiRequest(request, model, stream: true, glm);
 
         var index = 0;
+        string? streamId = null;
+        var done = false;
         var toolCalls = new MistralToolCallAssembler();
-        await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
+        await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken, () => done = true))
         {
             if (chunk.IsFailure)
             {
                 yield return Result.Failure<CompletionChunk>(chunk.Error);
                 yield break;
+            }
+
+            if (string.IsNullOrEmpty(streamId))
+            {
+                streamId = chunk.Value.Id;
             }
 
             // Every delta's tool_calls are kept, the skipped GLM ones included: the calls go out whole on the final chunk.
@@ -135,7 +145,7 @@ internal sealed class MistralAIProvider : IAIProvider
 
             if (completionChunk.IsFinal)
             {
-                completionChunk = completionChunk with { ToolCalls = toolCalls.Build() };
+                completionChunk = completionChunk with { ToolCalls = toolCalls.Build(streamId) };
             }
 
             yield return Result.Success(completionChunk);
@@ -145,6 +155,28 @@ internal sealed class MistralAIProvider : IAIProvider
                 yield break;
             }
         }
+
+        // No delta carried a finish_reason. Without a call, or once the caller cancelled (the SSE loop then stops
+        // without an exception), the stream ends as before: nothing more.
+        if (cancellationToken.IsCancellationRequested || toolCalls.Build(streamId) is not { } calls)
+        {
+            yield break;
+        }
+
+        // [DONE] was read: the turn is over, and the calls put together go out on a final chunk of their own. Without
+        // [DONE], the connection was cut and the calls may be partial: never passed on as a finished turn.
+        yield return done
+            ? Result.Success(new CompletionChunk
+            {
+                Id = streamId ?? string.Empty,
+                ContentDelta = string.Empty,
+                Index = index,
+                IsFinal = true,
+                FinishReason = FinishReason.ToolCall,
+                ToolCalls = calls,
+            })
+            : Result.Failure<CompletionChunk>(AIErrors.StreamInterrupted(
+                "The Mistral stream ended before [DONE] with tool calls under way; they may be partial and are not returned."));
     }
 
     /// <inheritdoc />
@@ -503,7 +535,9 @@ internal sealed class MistralAIProvider : IAIProvider
                 PromptTokens = apiResponse.Usage?.PromptTokens ?? 0,
                 CompletionTokens = apiResponse.Usage?.CompletionTokens ?? 0
             },
-            ToolCalls = message?.ToolCalls is { Count: > 0 } calls ? calls.Select(MapToToolCall).ToList() : null,
+            ToolCalls = message?.ToolCalls is { Count: > 0 } calls
+                ? calls.Select((call, position) => MapToToolCall(call, apiResponse.Id, position)).ToList()
+                : null,
             CreatedAt = apiResponse.Created > 0
                 ? DateTimeOffset.FromUnixTimeSeconds(apiResponse.Created).UtcDateTime
                 : DateTime.UtcNow,
@@ -511,12 +545,18 @@ internal sealed class MistralAIProvider : IAIProvider
         };
     }
 
-    private static ToolCall MapToToolCall(MistralToolCall toolCall) => new()
+    private static ToolCall MapToToolCall(MistralToolCall toolCall, string completionId, int position)
     {
-        Id = MistralToolCallAssembler.IdOf(toolCall.Id) ?? string.Empty,
-        Name = toolCall.Function?.Name ?? string.Empty,
-        ArgumentsJson = string.IsNullOrEmpty(toolCall.Function?.Arguments) ? "{}" : toolCall.Function.Arguments
-    };
+        var name = toolCall.Function?.Name ?? string.Empty;
+        var arguments = string.IsNullOrEmpty(toolCall.Function?.Arguments) ? "{}" : toolCall.Function.Arguments;
+        return new ToolCall
+        {
+            Id = MistralToolCallAssembler.IdOf(toolCall.Id)
+                ?? MistralToolCallAssembler.IdFor(completionId, position, name, arguments),
+            Name = name,
+            ArgumentsJson = arguments
+        };
+    }
 
     /// <summary>
     /// Mistral's <c>message.content</c> is normally a string, but for assistant replies to vision
