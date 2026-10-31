@@ -31,17 +31,19 @@ var ranked = await reranker.RerankAsync(query, passages, new RerankOptions { Top
 | `ApiKey` | — | Required. Sent as `Authorization: Bearer <key>`, trimmed; never logged. |
 | `Model` | `rerank-v5.0-pro` | The model when the call's `RerankOptions.Model` is unset. |
 | `MaxTokensPerDoc` | unset | `max_tokens_per_doc`, sent only when set. The v4.0 / v5.0 models take 32k tokens (query and document together); v3.5 and the v3.0 models, 4k. |
-| `MaxBatchSize` | `1000` | Documents per request; Cohere recommends against sending more than 1 000. More go in several requests, and are merged. |
+| `MaxBatchSize` | `1000` | Documents per request, 1 to 10 000 (Cohere's ceiling: documents × `max_chunks_per_doc`, 1 by default, at most 10 000); Cohere recommends against sending more than 1 000. More go in several requests, merged on their scores (see below). |
 | `MaxConcurrentBatches` | `4` | Batches in flight at once; each counts against the key's rate limit (1 000 requests a minute on a production key, 10 on a trial key). |
 | `TimeoutSeconds` | `10` | The call's budget, every batch included; past it, `AI.RerankFailed`. |
 | `EnableLogging` | `false` | Logs the request bodies at Debug. The documents are in them; the key is not. |
 
 ## On the wire
 
-Read from https://docs.cohere.com/reference/rerank, https://docs.cohere.com/docs/rerank and
+Read from https://docs.cohere.com/reference/rerank, https://docs.cohere.com/docs/rerank,
+https://docs.cohere.com/docs/reranking-best-practices, https://docs.cohere.com/changelog/rerank-v5 and
 https://docs.cohere.com/docs/rate-limits on 2026-10-31.
 
-- Request: `{"model", "query", "documents": [...], "max_tokens_per_doc"?}`. `top_n` is not sent: every batch comes back
+- Request: `{"model", "query", "documents": [...], "max_tokens_per_doc"?}`. The query takes 1 to 2 048 tokens: past them,
+  Cohere cuts it to its first 2 048 (stated for `rerank-v3.5` and the v3.0 models). `top_n` is not sent: every batch comes back
   whole, so that it can be checked, and `TopN` keeps the best after the merge. `priority` and `relevant_spans` are not
   sent.
 - Answer: `{"id", "results": [{"index", "relevance_score"}], "meta"}`; the score is normalized to `[0, 1]`. A batch whose
@@ -52,13 +54,15 @@ https://docs.cohere.com/docs/rate-limits on 2026-10-31.
 - Every failure is a `Result`: a 4xx or 5xx (Cohere's `message` in the error), an unreadable answer, a transport error or
   the budget running out is `AI.RerankFailed`; the first failing batch stops the others. Only your own cancellation
   throws. No retry handler: on a rerank budget, fall back to the order you have.
-- Options that cannot serve (a `BaseUrl` that is not absolute `http` / `https`, no key or model, a batch size,
-  concurrency or timeout below 1, `MaxTokensPerDoc` below 1) fail the start: `AddCompendiumCohereReranker` validates them
+- Options that cannot serve (a `BaseUrl` that is not absolute `http` / `https`, no key or model, a batch size
+  outside 1 to 10 000, a concurrency or timeout below 1, `MaxTokensPerDoc` below 1) fail the start: `AddCompendiumCohereReranker` validates them
   on start, and a reranker built by hand answers `AI.RerankFailed` before any request.
 
-Batches are scored apart and merged on their scores: Cohere documents each score as the relevance of one document to
-the query, normalized to `[0, 1]`, but does not say in so many words that it is independent of the other documents of
-the request. Keep `MaxBatchSize` at or above your usual candidate count and a rerank is one request.
+Batches are scored apart and merged on their scores, which assumes a score does not depend on the other documents of its
+request. Cohere does not guarantee it: "The score is query dependent, and could be higher or lower depending on the query
+and passages sent in" (reranking best practices); Rerank v5 announces calibrated scores, "consistent across queries and
+domains". Up to `MaxBatchSize` documents (1 000 by default) a rerank is one request and nothing is merged: keep it at or
+above your usual candidate count.
 
 ## License
 

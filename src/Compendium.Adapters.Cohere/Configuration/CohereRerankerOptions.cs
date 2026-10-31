@@ -27,6 +27,12 @@ public sealed class CohereRerankerOptions
     /// </summary>
     public const int DefaultMaxBatchSize = 1000;
 
+    /// <summary>
+    /// The most documents Cohere takes in one request (documents × <c>max_chunks_per_doc</c>, 1 by default, at most
+    /// 10 000): the ceiling of <see cref="MaxBatchSize"/>.
+    /// </summary>
+    public const int MaxDocumentsPerRequest = 10_000;
+
     /// <summary>The batches in flight at once by default (<see cref="MaxConcurrentBatches"/>).</summary>
     public const int DefaultMaxConcurrentBatches = 4;
 
@@ -53,8 +59,9 @@ public sealed class CohereRerankerOptions
     public int? MaxTokensPerDoc { get; set; }
 
     /// <summary>
-    /// The most documents sent in one request; more are sent in several and merged. Default
-    /// <see cref="DefaultMaxBatchSize"/>.
+    /// The most documents sent in one request, at most <see cref="MaxDocumentsPerRequest"/>; more are sent in several and
+    /// merged on their scores, which assumes a score does not depend on the other documents of its request (not
+    /// guaranteed by Cohere). Default <see cref="DefaultMaxBatchSize"/>.
     /// </summary>
     public int MaxBatchSize { get; set; } = DefaultMaxBatchSize;
 
@@ -78,7 +85,8 @@ public sealed class CohereRerankerOptions
 
     /// <summary>
     /// Whether the options can serve a request: an absolute <c>http</c> / <c>https</c> base URL, a key, a model,
-    /// <see cref="MaxBatchSize"/>, <see cref="MaxConcurrentBatches"/> and <see cref="TimeoutSeconds"/> of at least 1, and
+    /// <see cref="MaxBatchSize"/> between 1 and <see cref="MaxDocumentsPerRequest"/>, <see cref="MaxConcurrentBatches"/> and
+    /// <see cref="TimeoutSeconds"/> of at least 1, and
     /// <see cref="MaxTokensPerDoc"/> unset or at least 1. Checked when the reranker is resolved
     /// (<c>AddCompendiumCohereReranker</c> validates on start) and again before each call.
     /// </summary>
@@ -107,9 +115,9 @@ public sealed class CohereRerankerOptions
             return $"MaxTokensPerDoc must be at least 1 when set, not {MaxTokensPerDoc}";
         }
 
-        if (MaxBatchSize < 1)
+        if (MaxBatchSize is < 1 or > MaxDocumentsPerRequest)
         {
-            return $"MaxBatchSize must be at least 1, not {MaxBatchSize}";
+            return $"MaxBatchSize must be between 1 and {MaxDocumentsPerRequest}, not {MaxBatchSize}";
         }
 
         if (MaxConcurrentBatches < 1)
@@ -122,5 +130,5 @@ public sealed class CohereRerankerOptions
 
     /// <summary>The message <c>AddCompendiumCohereReranker</c> fails the start with when <see cref="IsValid"/> is false.</summary>
     internal const string InvalidMessage =
-        "CohereRerankerOptions: BaseUrl must be an absolute http or https URL, ApiKey and Model are required, MaxTokensPerDoc unset or at least 1, and MaxBatchSize, MaxConcurrentBatches and TimeoutSeconds at least 1.";
+        "CohereRerankerOptions: BaseUrl must be an absolute http or https URL, ApiKey and Model are required, MaxTokensPerDoc unset or at least 1, MaxBatchSize between 1 and 10000, and MaxConcurrentBatches and TimeoutSeconds at least 1.";
 }

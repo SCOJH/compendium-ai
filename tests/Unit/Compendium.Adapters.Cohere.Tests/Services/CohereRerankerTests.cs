@@ -299,6 +299,7 @@ public class CohereRerankerTests
     [InlineData(BaseUrl, "co", "", null, 1000, 4, 10, "Model")]
     [InlineData(BaseUrl, "co", "m", 0, 1000, 4, 10, "MaxTokensPerDoc")]
     [InlineData(BaseUrl, "co", "m", null, 0, 4, 10, "MaxBatchSize")]
+    [InlineData(BaseUrl, "co", "m", null, 10_001, 4, 10, "between 1 and 10000")]
     [InlineData(BaseUrl, "co", "m", null, 1000, 0, 10, "MaxConcurrentBatches")]
     [InlineData(BaseUrl, "co", "m", null, 1000, 4, 0, "TimeoutSeconds")]
     [InlineData(BaseUrl, "co", "m", null, 1000, 4, -5, "TimeoutSeconds")]

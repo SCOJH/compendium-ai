@@ -30,11 +30,13 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   `AddCompendiumCohereReranker(IConfiguration | Action<CohereRerankerOptions>)` registers it (`CohereReranker` section:
   `BaseUrl` `https://api.cohere.com`, `ApiKey` required and sent as Bearer, never logged, `Model` `rerank-v5.0-pro` when
   the call's `RerankOptions.Model` is unset, `MaxTokensPerDoc` sent only when set, `MaxBatchSize` 1000 — Cohere's
-  recommended ceiling —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for the whole call), validated on start. The
+  recommended ceiling; at most 10 000, Cohere's limit per request —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for the whole call), validated on start. The
   request is `{model, query, documents, max_tokens_per_doc?}`; `top_n` is not sent, so every batch comes back whole and
   is checked, and `TopN` keeps the best after the merge. The documents come back by descending `relevance_score` (0 to
   1), each with its index in the input; more than a batch go in several requests, at most `MaxConcurrentBatches` at a
-  time, and are merged (equal scores keep the input order); the first failing batch stops the others.
+  time, and are merged on their scores (equal scores keep the input order) — which assumes scores independent of the
+  other documents of a request, not guaranteed by Cohere; up to `MaxBatchSize` a rerank is one request —; the first
+  failing batch stops the others.
   `ReturnDocuments` fills `Document` from the input. A 4xx or 5xx (Cohere's `message` in the error), an unreadable
   answer, an answer that does not rank every document of its batch exactly once, a transport error or the budget
   running out is `Result.Failure(AI.RerankFailed)`, never an exception (the caller's own cancellation still throws); a
