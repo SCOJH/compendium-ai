@@ -73,6 +73,15 @@ public sealed record CompletionRequest
     public ReasoningOptions? Reasoning { get; init; }
 
     /// <summary>
+    /// Gets the JSON Schema the answer must follow, constrained by the provider itself, or <see langword="null"/> (the
+    /// default) to leave the request as it was: see <see cref="Models.ResponseSchema"/>. An adapter that cannot constrain
+    /// the model (<see cref="IAIProvider.SupportsJsonSchema"/> <see langword="false"/>) sends the request without it and
+    /// logs a warning. It takes precedence over a provider's own structured-output parameters
+    /// (<see cref="AdditionalParameters"/>).
+    /// </summary>
+    public ResponseSchema? ResponseSchema { get; init; }
+
+    /// <summary>
     /// Gets the stop sequences that will halt generation.
     /// </summary>
     public IReadOnlyList<string>? StopSequences { get; init; }

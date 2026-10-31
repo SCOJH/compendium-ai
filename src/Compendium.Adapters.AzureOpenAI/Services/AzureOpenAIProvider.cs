@@ -60,7 +60,13 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         var deployment = _options.ResolveDeployment(model);
         _logger.LogDebug("Sending Azure OpenAI chat completion to deployment {Deployment} (model {Model})", deployment, model);
 
-        var apiRequest = MapToApiRequest(request, stream: false);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
+        }
+
+        var apiRequest = MapToApiRequest(request, stream: false, responseSchema.Value);
         var result = await _httpClient.CreateChatCompletionAsync(deployment, apiRequest, cancellationToken);
         return result.Match(
             r => MapToCompletionResultWithFilter(r, model),
@@ -78,7 +84,14 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         var deployment = _options.ResolveDeployment(model);
         _logger.LogDebug("Sending Azure OpenAI streaming completion to deployment {Deployment} (model {Model})", deployment, model);
 
-        var apiRequest = MapToApiRequest(request, stream: true);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
+            yield break;
+        }
+
+        var apiRequest = MapToApiRequest(request, stream: true, responseSchema.Value);
 
         var index = 0;
         await foreach (var chunk in _httpClient.StreamChatCompletionAsync(deployment, apiRequest, cancellationToken))
@@ -206,6 +219,13 @@ internal sealed class AzureOpenAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: a deployment's name does not say its model, and Azure answers a model without
+    /// structured outputs (before GPT-4o 2024-08-06) or an API version before 2024-08-01-preview with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -230,7 +250,7 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         }
     }
 
-    private AzureOpenAIChatCompletionRequest MapToApiRequest(CompletionRequest request, bool stream)
+    private AzureOpenAIChatCompletionRequest MapToApiRequest(CompletionRequest request, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<AzureOpenAIChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -267,7 +287,7 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         }
 
         ApplyTools(apiRequest, request);
-        ApplyResponseFormat(apiRequest, request);
+        ApplyResponseFormat(apiRequest, request, responseSchema);
         return apiRequest;
     }
 
@@ -344,8 +364,37 @@ internal sealed class AzureOpenAIProvider : IAIProvider
         }
     }
 
-    private void ApplyResponseFormat(AzureOpenAIChatCompletionRequest apiRequest, CompletionRequest request)
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="AzureOpenAIStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
+    private void ApplyResponseFormat(AzureOpenAIChatCompletionRequest apiRequest, CompletionRequest request, JsonElement? responseSchema)
     {
+        if (request.ResponseSchema is { } wanted && responseSchema is { } schema)
+        {
+            apiRequest.ResponseFormat = new AzureOpenAIResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new AzureOpenAIJsonSchemaFormat
+                {
+                    Name = wanted.Name,
+                    Schema = schema,
+                    Strict = wanted.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(AzureOpenAIStructuredOutputExtensions.SchemaKey, out var schemaRaw)

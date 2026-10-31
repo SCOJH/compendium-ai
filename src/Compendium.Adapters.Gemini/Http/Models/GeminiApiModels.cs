@@ -156,6 +156,9 @@ internal sealed class GeminiGenerationConfig
 
     [JsonPropertyName("responseSchema")]
     public JsonElement? ResponseSchema { get; set; }
+
+    [JsonPropertyName("responseJsonSchema")]
+    public JsonElement? ResponseJsonSchema { get; set; }
 }
 
 /// <summary>

@@ -184,6 +184,10 @@ var result = await ai.CompleteAsync(
 var result = await ai.CompleteAsync(request.WithJsonMode());
 ```
 
+The provider-agnostic way is `CompletionRequest.ResponseSchema` (`new ResponseSchema { Name = "Weather", SchemaJson = schema }`):
+the same `response_format.json_schema` here, the same request on every adapter, and `IAIProvider.SupportsJsonSchema(model)` to ask first. It
+takes precedence over the keys above. See the repository README, "Structured output".
+
 ## Production checklist
 
 - [ ] **TLS termination** — never run the proxy on plain HTTP across a public network. Front it

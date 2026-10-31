@@ -88,8 +88,14 @@ internal sealed class MistralAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral chat completion to model {Model}", model);
 
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
+        }
+
         var glm = GlmDialect.Recognise(model);
-        var apiRequest = MapToApiRequest(request, model, stream: false, glm);
+        var apiRequest = MapToApiRequest(request, model, stream: false, glm, responseSchema.Value);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
             r => Result.Success(MapToCompletionResponse(r, request.Reasoning, glm is not null)),
@@ -104,8 +110,15 @@ internal sealed class MistralAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Mistral streaming chat completion to model {Model}", model);
 
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
+            yield break;
+        }
+
         var glm = GlmDialect.Recognise(model);
-        var apiRequest = MapToApiRequest(request, model, stream: true, glm);
+        var apiRequest = MapToApiRequest(request, model, stream: true, glm, responseSchema.Value);
 
         var index = 0;
         string? streamId = null;
@@ -253,6 +266,13 @@ internal sealed class MistralAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: Mistral takes a custom JSON schema on its chat models, and answers a model that does
+    /// not chat with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -267,7 +287,7 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    private MistralChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, GlmModel? glm)
+    private MistralChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, GlmModel? glm, JsonElement? responseSchema)
     {
         var messages = new List<MistralChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -304,7 +324,7 @@ internal sealed class MistralAIProvider : IAIProvider
         };
 
         ApplyTools(apiRequest, request);
-        ApplyResponseFormat(apiRequest, request);
+        ApplyResponseFormat(apiRequest, request, responseSchema);
         return apiRequest;
     }
 
@@ -447,8 +467,37 @@ internal sealed class MistralAIProvider : IAIProvider
         }
     }
 
-    private void ApplyResponseFormat(MistralChatCompletionRequest apiRequest, CompletionRequest request)
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="MistralStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
+    private void ApplyResponseFormat(MistralChatCompletionRequest apiRequest, CompletionRequest request, JsonElement? responseSchema)
     {
+        if (request.ResponseSchema is { } wanted && responseSchema is { } schema)
+        {
+            apiRequest.ResponseFormat = new MistralResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new MistralJsonSchemaFormat
+                {
+                    Name = wanted.Name,
+                    Schema = schema,
+                    Strict = wanted.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(MistralStructuredOutputExtensions.SchemaKey, out var schemaRaw)

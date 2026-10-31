@@ -60,6 +60,20 @@ public interface IAIProvider
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Whether this provider constrains <paramref name="model"/>'s answer to <see cref="CompletionRequest.ResponseSchema"/>
+    /// natively (structured output). <see langword="false"/> unless the provider says otherwise: the request is then sent
+    /// without the schema, without an error, and the caller that needs the constraint puts the schema in the prompt and
+    /// checks the answer itself.
+    /// </summary>
+    /// <remarks>
+    /// It says what the adapter sends, from the model id alone: the provider stays the judge of the schema (a subset of
+    /// JSON Schema it refuses comes back as its error) and of a model the adapter does not know. A wrapper that implements
+    /// this interface answers <see langword="false"/> until it forwards the call.
+    /// </remarks>
+    /// <param name="model">The model id, as in <see cref="CompletionRequest.Model"/>.</param>
+    bool SupportsJsonSchema(string model) => false;
+
+    /// <summary>
     /// Checks if the provider is healthy and accessible.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

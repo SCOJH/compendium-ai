@@ -64,7 +64,13 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Anthropic message request to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: false, responseSchema.Value);
         var result = await _httpClient.CreateMessageAsync(apiRequest, cancellationToken);
 
         return result.Match(
@@ -81,7 +87,14 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Anthropic streaming message request to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
+            yield break;
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: true, responseSchema.Value);
         var surfaceReasoning = request.Reasoning is { IncludeReasoning: true };
 
         var messageId = string.Empty;
@@ -213,6 +226,14 @@ internal sealed class AnthropicAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Claude Sonnet 4.5, Opus 4.5, Haiku 4.5 and every later model, Fable and Mythos included (<c>output_config.format</c>);
+    /// not the 3.x models, Opus 4 and 4.1, nor Sonnet 4. An empty id is the default model.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) =>
+        ClaudeStructuredOutput.Supports(string.IsNullOrWhiteSpace(model) ? _options.DefaultModel : model);
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -245,7 +266,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
         }
     }
 
-    private AnthropicMessagesRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private AnthropicMessagesRequest MapToApiRequest(CompletionRequest request, string model, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<AnthropicMessage>();
         var extraSystem = new StringBuilder();
@@ -314,8 +335,31 @@ internal sealed class AnthropicAIProvider : IAIProvider
             _logger.LogDebug("Model {Model} has no extended thinking: the request is sent without it", model);
         }
 
+        // Structured output, after the reasoning: output_config may already carry its effort.
+        if (responseSchema is { } schema)
+        {
+            ClaudeStructuredOutput.Apply(apiRequest, schema);
+        }
+        else if (request.ResponseSchema is { } wanted)
+        {
+            _logger.LogWarning(
+                "Anthropic does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                wanted.Name);
+        }
+
         return apiRequest;
     }
+
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
 
     private static string? CombineSystemPrompt(string? primary, StringBuilder addendum)
     {

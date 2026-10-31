@@ -50,7 +50,13 @@ internal sealed class OllamaAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Ollama chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: false, responseSchema.Value);
 
         var result = await _httpClient.ChatAsync(apiRequest, cancellationToken);
 
@@ -83,7 +89,14 @@ internal sealed class OllamaAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Ollama streaming chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
+            yield break;
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: true, responseSchema.Value);
 
         var index = 0;
         await foreach (var chunkResult in _httpClient.ChatStreamAsync(apiRequest, cancellationToken))
@@ -224,6 +237,13 @@ internal sealed class OllamaAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: Ollama (0.5 and later) constrains any model it serves to the schema given as
+    /// <c>format</c>; an earlier server answers with its own error.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -238,7 +258,7 @@ internal sealed class OllamaAIProvider : IAIProvider
         }
     }
 
-    private OllamaChatRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private OllamaChatRequest MapToApiRequest(CompletionRequest request, string model, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<OllamaChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -265,8 +285,22 @@ internal sealed class OllamaAIProvider : IAIProvider
         };
 
         ApplyTools(apiRequest, request);
+
+        // ResponseSchema as format: Ollama's grammar constrains the answer to the schema, with or without Strict.
+        apiRequest.Format = responseSchema;
+
         return apiRequest;
     }
+
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
 
     private OllamaRequestOptions BuildOptions(CompletionRequest request)
     {

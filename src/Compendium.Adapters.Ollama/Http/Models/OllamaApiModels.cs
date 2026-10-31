@@ -24,8 +24,9 @@ internal sealed class OllamaChatRequest
     [JsonPropertyName("tools")]
     public List<OllamaToolDefinition>? Tools { get; set; }
 
+    /// <summary>A JSON Schema the answer must follow (<see cref="CompletionRequest.ResponseSchema"/>), or unset.</summary>
     [JsonPropertyName("format")]
-    public string? Format { get; set; }
+    public JsonElement? Format { get; set; }
 
     [JsonPropertyName("keep_alive")]
     public string? KeepAlive { get; set; }

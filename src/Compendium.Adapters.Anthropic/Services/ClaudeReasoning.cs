@@ -131,7 +131,7 @@ internal static partial class ClaudeReasoning
     // claude-opus-4-7, claude-sonnet-5, claude-opus-5-5, claude-haiku-4-5-20251001, claude-sonnet-4-20250514 (4, no minor),
     // anthropic.claude-opus-4-7 (a gateway's prefix): a 1-2 digit minor, never the start of a date.
     [GeneratedRegex(@"claude-(?<family>opus|sonnet|haiku|fable|mythos)(?:-(?<major>\d{1,2})(?:[-.](?<minor>\d{1,2})(?!\d))?(?!\d))?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex Family();
+    internal static partial Regex Family();
 
     [GeneratedRegex(@"claude-(?<major>\d)-(?<minor>\d)-(?<family>opus|sonnet|haiku)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Legacy();

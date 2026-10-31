@@ -45,7 +45,13 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending LiteLLM chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: false, responseSchema.Value);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
             r => Result.Success(MapToCompletionResponse(r)),
@@ -60,7 +66,14 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending LiteLLM streaming chat completion to model {Model}", model);
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
+        {
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
+            yield break;
+        }
+
+        var apiRequest = MapToApiRequest(request, model, stream: true, responseSchema.Value);
 
         var index = 0;
         await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
@@ -157,6 +170,13 @@ internal sealed class LiteLLMAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: the proxy translates <c>response_format.json_schema</c> for the provider behind the
+    /// model, and answers with its own error where it cannot.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => true;
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -171,7 +191,7 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         }
     }
 
-    private LiteLLMChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private LiteLLMChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<LiteLLMChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -207,7 +227,7 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         }
 
         ApplyTools(apiRequest, request);
-        ApplyResponseFormat(apiRequest, request);
+        ApplyResponseFormat(apiRequest, request, responseSchema);
         return apiRequest;
     }
 
@@ -245,8 +265,37 @@ internal sealed class LiteLLMAIProvider : IAIProvider
         }
     }
 
-    private void ApplyResponseFormat(LiteLLMChatCompletionRequest apiRequest, CompletionRequest request)
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; then the
+    /// <see cref="LiteLLMStructuredOutputExtensions"/> keys and the default JSON mode, as before.
+    /// </summary>
+    private void ApplyResponseFormat(LiteLLMChatCompletionRequest apiRequest, CompletionRequest request, JsonElement? responseSchema)
     {
+        if (request.ResponseSchema is { } wanted && responseSchema is { } schema)
+        {
+            apiRequest.ResponseFormat = new LiteLLMResponseFormat
+            {
+                Type = "json_schema",
+                JsonSchema = new LiteLLMJsonSchemaFormat
+                {
+                    Name = wanted.Name,
+                    Schema = schema,
+                    Strict = wanted.Strict
+                }
+            };
+            return;
+        }
+
         var parameters = request.AdditionalParameters;
         if (parameters != null
             && parameters.TryGetValue(LiteLLMStructuredOutputExtensions.SchemaKey, out var schemaRaw)

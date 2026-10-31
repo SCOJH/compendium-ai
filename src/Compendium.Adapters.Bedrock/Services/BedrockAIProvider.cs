@@ -83,6 +83,11 @@ internal sealed class BedrockAIProvider : IAIProvider
         var modelId = ResolveModelId(request.Model);
         _logger.LogDebug("Bedrock Converse request to model {ModelId}", modelId);
 
+        if (InvalidResponseSchema(request, modelId) is { } invalid)
+        {
+            return Result.Failure<CompletionResponse>(invalid);
+        }
+
         var converseRequest = BuildConverseRequest(request, modelId);
 
         try
@@ -112,6 +117,12 @@ internal sealed class BedrockAIProvider : IAIProvider
 
         var modelId = ResolveModelId(request.Model);
         _logger.LogDebug("Bedrock ConverseStream request to model {ModelId}", modelId);
+
+        if (InvalidResponseSchema(request, modelId) is { } invalid)
+        {
+            yield return Result.Failure<CompletionChunk>(invalid);
+            yield break;
+        }
 
         var converseRequest = BuildConverseStreamRequest(request, modelId);
 
@@ -201,6 +212,14 @@ internal sealed class BedrockAIProvider : IAIProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Claude Sonnet, Opus and Haiku 4.5 and later, Fable and Mythos (<c>outputConfig.textFormat</c>), directly or through a
+    /// cross-Region profile, except Claude Haiku 4.5 through the India profile (<c>in.</c>); the other models Bedrock
+    /// serves, not yet. An empty id is the default model.
+    /// </remarks>
+    public bool SupportsJsonSchema(string model) => BedrockStructuredOutput.Supports(ResolveModelId(model));
+
+    /// <inheritdoc />
     public async Task<Result> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         var modelId = _options.DefaultModelId;
@@ -257,6 +276,7 @@ internal sealed class BedrockAIProvider : IAIProvider
             Messages = messages,
             System = systemBlocks,
             InferenceConfig = BuildInferenceConfig(request),
+            OutputConfig = OutputConfigFor(request, modelId),
         };
     }
 
@@ -273,8 +293,39 @@ internal sealed class BedrockAIProvider : IAIProvider
             Messages = messages,
             System = systemBlocks,
             InferenceConfig = BuildInferenceConfig(request),
+            OutputConfig = OutputConfigFor(request, modelId),
         };
     }
+
+    /// <summary>
+    /// <see cref="CompletionRequest.ResponseSchema"/> as <c>outputConfig.textFormat</c> on a model that takes it
+    /// (<see cref="BedrockStructuredOutput"/>); on another, none and a warning. The schema goes as the JSON string it is,
+    /// checked by <see cref="InvalidResponseSchema"/> before the request.
+    /// </summary>
+    private OutputConfig? OutputConfigFor(CompletionRequest request, string modelId)
+    {
+        if (request.ResponseSchema is not { } responseSchema)
+        {
+            return null;
+        }
+
+        if (SupportsJsonSchema(modelId))
+        {
+            return BedrockStructuredOutput.For(responseSchema);
+        }
+
+        _logger.LogWarning(
+            "Bedrock does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+            modelId,
+            responseSchema.Name);
+        return null;
+    }
+
+    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
+    private Error? InvalidResponseSchema(CompletionRequest request, string modelId) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(modelId) && schema.Parse() is { IsFailure: true } parsed
+            ? parsed.Error
+            : null;
 
     /// <summary>
     /// Map the IAIProvider messages to Bedrock <see cref="BedrockMessage"/> / <see cref="SystemContentBlock"/>.
