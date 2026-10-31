@@ -86,6 +86,22 @@ public class CohereRerankerRegistrationTests
     }
 
     [Fact]
+    public void AddCompendiumCohereReranker_WithABatchAboveCoheresTenThousandDocuments_FailsAtResolution()
+    {
+        var services = Services();
+
+        services.AddCompendiumCohereReranker(o =>
+        {
+            o.ApiKey = "co";
+            o.MaxBatchSize = 10_001;
+        });
+        using var sp = services.BuildServiceProvider();
+
+        ((Action)(() => sp.GetRequiredService<IReranker>())).Should().Throw<OptionsValidationException>()
+            .Which.Message.Should().Contain("MaxBatchSize between 1 and 10000");
+    }
+
+    [Fact]
     public void AddCompendiumCohereReranker_WithATimeoutBelowOne_FailsAtResolution()
     {
         var configuration = new ConfigurationBuilder()
@@ -170,6 +186,8 @@ public class CohereRerankerRegistrationTests
     [InlineData("https://api.cohere.com", "k", " ", null, 1000, 10, false)]
     [InlineData("https://api.cohere.com", "k", "rerank-v3.5", -1, 1000, 10, false)]
     [InlineData("https://api.cohere.com", "k", "rerank-v3.5", null, 0, 10, false)]
+    [InlineData("https://api.cohere.com", "k", "rerank-v3.5", null, 10_000, 10, true)]
+    [InlineData("https://api.cohere.com", "k", "rerank-v3.5", null, 10_001, 10, false)]
     [InlineData("https://api.cohere.com", "k", "rerank-v3.5", null, 1000, 0, false)]
     public void CohereRerankerOptions_IsValid(string baseUrl, string apiKey, string model, int? maxTokensPerDoc, int maxBatchSize, int timeoutSeconds, bool expected)
     {
