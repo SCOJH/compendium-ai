@@ -18,8 +18,11 @@ namespace Compendium.Adapters.Cohere.Services;
 /// <remarks>
 /// <para>
 /// More documents than <see cref="CohereRerankerOptions.MaxBatchSize"/> go in several requests, at most
-/// <see cref="CohereRerankerOptions.MaxConcurrentBatches"/> at a time, and are merged: a rerank model scores each
-/// (query, document) pair. Equal scores keep the input order. The first batch that fails stops the others.
+/// <see cref="CohereRerankerOptions.MaxConcurrentBatches"/> at a time, and are merged on their scores. That merge assumes
+/// a score does not depend on the other documents of the request, which Cohere does not guarantee ("the score is query
+/// dependent, and could be higher or lower depending on the query and passages sent in"; Rerank v5's scores are announced
+/// as calibrated): up to <see cref="CohereRerankerOptions.MaxBatchSize"/> documents (1 000 by default), a rerank is one
+/// request and nothing is merged. Equal scores keep the input order. The first batch that fails stops the others.
 /// </para>
 /// <para>
 /// Every failure is a <see cref="Result"/>, never an exception: a 4xx or 5xx, an unreadable answer, an index outside its
