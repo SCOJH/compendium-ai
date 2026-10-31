@@ -7,6 +7,7 @@
 
 using Compendium.Adapters.Gemini.StructuredOutputs;
 using Compendium.Adapters.Gemini.Tests.TestSupport;
+using Compendium.Adapters.Gemini.Tools;
 
 namespace Compendium.Adapters.Gemini.Tests.Services;
 
@@ -79,6 +80,40 @@ public class GeminiResponseSchemaTests
     }
 
     [Fact]
+    public async Task CompleteAsync_WithResponseSchemaAndToolsOnGemini2_SendsTheToolsWithoutTheSchemaAndWarns()
+    {
+        var (sut, handler, logger) = Create();
+        var body = Capture(handler, "*:generateContent*", """{"candidates":[]}""");
+        var request = Request("gemini-2.5-flash").WithTools([new AgentTool("search", "Searches.")]);
+
+        var result = await sut.CompleteAsync(request with { ResponseSchema = Route });
+
+        result.IsSuccess.Should().BeTrue();
+        var root = JsonDocument.Parse(body()!).RootElement;
+        root.GetProperty("tools").GetArrayLength().Should().Be(1);
+        root.GetProperty("generationConfig").TryGetProperty("responseJsonSchema", out _).Should().BeFalse();
+        root.GetProperty("generationConfig").TryGetProperty("responseMimeType", out _).Should().BeFalse();
+        logger.Warnings.Should().ContainSingle().Which.Should().Contain("gemini-2.5-flash").And.Contain("function calling");
+    }
+
+    [Theory]
+    [InlineData("gemini-3-pro-preview")]
+    [InlineData("gemini-pro-latest")]
+    public async Task CompleteAsync_WithResponseSchemaAndToolsOnGemini3OrAnAlias_SendsBoth(string model)
+    {
+        var (sut, handler, logger) = Create();
+        var body = Capture(handler, "*:generateContent*", """{"candidates":[]}""");
+        var request = Request(model).WithTools([new AgentTool("search", "Searches.")]);
+
+        await sut.CompleteAsync(request with { ResponseSchema = Route });
+
+        var root = JsonDocument.Parse(body()!).RootElement;
+        root.GetProperty("tools").GetArrayLength().Should().Be(1);
+        root.GetProperty("generationConfig").GetProperty("responseJsonSchema").GetRawText().Should().Be(Schema);
+        logger.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task CompleteAsync_WithAnInvalidResponseSchema_FailsBeforeAnyRequest()
     {
         var (sut, handler, _) = Create();
@@ -111,10 +146,15 @@ public class GeminiResponseSchemaTests
     [InlineData("gemini-2.0-flash", true)]
     [InlineData("models/gemini-2.5-pro", true)]
     [InlineData("gemini-3-pro-preview", true)]
+    [InlineData("gemini-pro-latest", true)]
+    [InlineData("models/gemini-flash-latest", true)]
     [InlineData("", true)]
     [InlineData("gemini-1.5-flash", false)]
     [InlineData("models/gemini-1.0-pro", false)]
     [InlineData("gemini-pro-vision", false)]
+    [InlineData("gemini-pro", false)]
+    [InlineData("gemini-pro-001", false)]
+    [InlineData("gemini-pro-vision-001", false)]
     [InlineData("gemma-3-12b-it", false)]
     [InlineData("text-embedding-004", false)]
     public void SupportsJsonSchema_ReadsTheModelId(string model, bool expected)

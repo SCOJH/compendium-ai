@@ -5,6 +5,7 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
+using System.Text.RegularExpressions;
 using Compendium.Abstractions.AI.Agents.Models;
 using Compendium.Adapters.Gemini.Configuration;
 using Compendium.Adapters.Gemini.Http;
@@ -19,7 +20,7 @@ namespace Compendium.Adapters.Gemini.Services;
 /// embeddings, tool calling, structured outputs, and vision via Gemini's public REST API
 /// (<c>generativelanguage.googleapis.com</c>).
 /// </summary>
-internal sealed class GeminiAIProvider : IAIProvider
+internal sealed partial class GeminiAIProvider : IAIProvider
 {
     private readonly GeminiHttpClient _httpClient;
     private readonly GeminiOptions _options;
@@ -47,12 +48,13 @@ internal sealed class GeminiAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Gemini generateContent to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            return Result.Failure<CompletionResponse>(invalid);
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
         }
 
-        var apiRequest = MapToApiRequest(request, model);
+        var apiRequest = MapToApiRequest(request, model, responseSchema.Value);
         var result = await _httpClient.GenerateContentAsync(model, apiRequest, cancellationToken);
         return result.Match(
             r => Result.Success(MapToCompletionResponse(r, model)),
@@ -68,13 +70,14 @@ internal sealed class GeminiAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending Gemini streamGenerateContent to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            yield return Result.Failure<CompletionChunk>(invalid);
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
             yield break;
         }
 
-        var apiRequest = MapToApiRequest(request, model);
+        var apiRequest = MapToApiRequest(request, model, responseSchema.Value);
 
         var index = 0;
         await foreach (var chunk in _httpClient.StreamGenerateContentAsync(model, apiRequest, cancellationToken))
@@ -202,9 +205,15 @@ internal sealed class GeminiAIProvider : IAIProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// The Gemini models from 2.0 on (<c>gemini-*</c>, with or without <c>models/</c>), which take
-    /// <c>responseJsonSchema</c>; not Gemini 1.x, <c>gemini-pro</c>, nor the Gemma models the API also serves. An empty id
-    /// is the default model.
+    /// <para>
+    /// The Gemini models from 2.0 on (<c>gemini-*</c>, with or without <c>models/</c>, the <c>-latest</c> aliases
+    /// included), which take <c>responseJsonSchema</c>; not Gemini 1.x, the first <c>gemini-pro</c> /
+    /// <c>gemini-pro-vision</c>, nor the Gemma models the API also serves. An empty id is the default model.
+    /// </para>
+    /// <para>
+    /// The schema and function calling go together on Gemini 3 only: on a Gemini 2.x request that carries tools, the
+    /// schema is not sent, and a warning says so.
+    /// </para>
     /// </remarks>
     public bool SupportsJsonSchema(string model) =>
         TakesJsonSchema(string.IsNullOrEmpty(model) ? _options.DefaultModel : model);
@@ -226,7 +235,7 @@ internal sealed class GeminiAIProvider : IAIProvider
 
     // ---------- Request mapping ----------
 
-    private GeminiGenerateContentRequest MapToApiRequest(CompletionRequest request, string model)
+    private GeminiGenerateContentRequest MapToApiRequest(CompletionRequest request, string model, JsonElement? responseSchema)
     {
         var contents = new List<GeminiContent>(request.Messages.Count);
         foreach (var message in request.Messages)
@@ -274,7 +283,7 @@ internal sealed class GeminiAIProvider : IAIProvider
         }
 
         ApplyTools(apiRequest, request);
-        ApplyResponseFormat(apiRequest, request, model);
+        ApplyResponseFormat(apiRequest, request, model, responseSchema);
         ApplyVisionParts(apiRequest, request);
 
         return apiRequest;
@@ -338,17 +347,32 @@ internal sealed class GeminiAIProvider : IAIProvider
 
     private static bool TakesJsonSchema(string model)
     {
-        var id = model.StartsWith("models/", StringComparison.OrdinalIgnoreCase) ? model["models/".Length..] : model;
+        var id = WithoutPrefix(model);
         return id.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase)
             && !id.StartsWith("gemini-1.", StringComparison.OrdinalIgnoreCase)
-            && !id.StartsWith("gemini-pro", StringComparison.OrdinalIgnoreCase);
+            && !FirstGeminiPro().IsMatch(id);
     }
 
-    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
-    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
-        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
-            ? parsed.Error
-            : null;
+    /// <summary>Whether <paramref name="model"/> is a numbered Gemini 2.x, where the schema and tools do not go together.</summary>
+    private static bool IsGemini2(string model) =>
+        WithoutPrefix(model).StartsWith("gemini-2.", StringComparison.OrdinalIgnoreCase);
+
+    private static string WithoutPrefix(string model) =>
+        model.StartsWith("models/", StringComparison.OrdinalIgnoreCase) ? model["models/".Length..] : model;
+
+    // The first Gemini Pro (1.0) and its vision variant, with or without their -001 style version: not gemini-pro-latest.
+    [GeneratedRegex(@"^gemini-pro(-vision)?(-\d{3})?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FirstGeminiPro();
+
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
 
     /// <summary>
     /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>responseJsonSchema</c> (JSON Schema, where
@@ -356,22 +380,31 @@ internal sealed class GeminiAIProvider : IAIProvider
     /// and the request as it was. Then the <see cref="GeminiStructuredOutputExtensions"/> keys and the default JSON mode,
     /// as before.
     /// </summary>
-    private void ApplyResponseFormat(GeminiGenerateContentRequest apiRequest, CompletionRequest request, string model)
+    private void ApplyResponseFormat(GeminiGenerateContentRequest apiRequest, CompletionRequest request, string model, JsonElement? responseSchema)
     {
-        if (request.ResponseSchema is { } responseSchema)
+        if (request.ResponseSchema is { } wanted)
         {
-            if (SupportsJsonSchema(model))
+            if (responseSchema is not null && apiRequest.Tools is { Count: > 0 } && IsGemini2(model))
+            {
+                _logger.LogWarning(
+                    "Gemini {Model} does not take a JSON schema with function calling (Gemini 3 does): ResponseSchema {Schema} is not sent",
+                    model,
+                    wanted.Name);
+                return;
+            }
+
+            if (responseSchema is { } schema)
             {
                 apiRequest.GenerationConfig ??= new GeminiGenerationConfig();
                 apiRequest.GenerationConfig.ResponseMimeType = "application/json";
-                apiRequest.GenerationConfig.ResponseJsonSchema = responseSchema.Parse().Value;
+                apiRequest.GenerationConfig.ResponseJsonSchema = schema;
                 return;
             }
 
             _logger.LogWarning(
                 "Gemini does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
                 model,
-                responseSchema.Name);
+                wanted.Name);
         }
 
         var parameters = request.AdditionalParameters;
