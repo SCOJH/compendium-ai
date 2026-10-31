@@ -211,8 +211,9 @@ internal sealed partial class GeminiAIProvider : IAIProvider
     /// <c>gemini-pro-vision</c>, nor the Gemma models the API also serves. An empty id is the default model.
     /// </para>
     /// <para>
-    /// The schema and function calling go together on Gemini 3 only: on a Gemini 2.x request that carries tools, the
-    /// schema is not sent, and a warning says so.
+    /// The schema and function calling go together on Gemini 3 only: on a numbered Gemini 2.x request that carries tools,
+    /// the schema is not sent (nor checked), and a warning says so. A <c>-latest</c> alias is sent both: one that still
+    /// points to a 2.5 model gets the provider's 400.
     /// </para>
     /// </remarks>
     public bool SupportsJsonSchema(string model) =>
@@ -370,9 +371,19 @@ internal sealed partial class GeminiAIProvider : IAIProvider
     /// invalid.
     /// </summary>
     private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
-        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && !ToolsBarSchema(request, model)
             ? schema.Parse().Map(parsed => (JsonElement?)parsed)
             : Result.Success<JsonElement?>(null);
+
+    /// <summary>
+    /// Whether <paramref name="request"/> carries tools (as <see cref="ApplyTools"/> sends them) to a numbered Gemini 2.x,
+    /// which takes no schema with function calling: the schema is then not sent, and so not checked.
+    /// </summary>
+    private static bool ToolsBarSchema(CompletionRequest request, string model) =>
+        IsGemini2(model)
+        && request.AdditionalParameters is { } parameters
+        && parameters.TryGetValue(GeminiToolCallingExtensions.ToolsKey, out var toolsRaw)
+        && toolsRaw is IReadOnlyList<AgentTool> { Count: > 0 };
 
     /// <summary>
     /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>responseJsonSchema</c> (JSON Schema, where
@@ -384,7 +395,7 @@ internal sealed partial class GeminiAIProvider : IAIProvider
     {
         if (request.ResponseSchema is { } wanted)
         {
-            if (responseSchema is not null && apiRequest.Tools is { Count: > 0 } && IsGemini2(model))
+            if (responseSchema is null && SupportsJsonSchema(model) && ToolsBarSchema(request, model))
             {
                 _logger.LogWarning(
                     "Gemini {Model} does not take a JSON schema with function calling (Gemini 3 does): ResponseSchema {Schema} is not sent",

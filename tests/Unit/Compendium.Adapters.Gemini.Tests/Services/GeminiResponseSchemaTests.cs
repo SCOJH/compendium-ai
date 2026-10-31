@@ -96,6 +96,20 @@ public class GeminiResponseSchemaTests
         logger.Warnings.Should().ContainSingle().Which.Should().Contain("gemini-2.5-flash").And.Contain("function calling");
     }
 
+    [Fact]
+    public async Task CompleteAsync_WithAnInvalidResponseSchemaAndToolsOnGemini2_IgnoresItWithoutAnError()
+    {
+        var (sut, handler, logger) = Create();
+        var body = Capture(handler, "*:generateContent*", """{"candidates":[]}""");
+        var request = Request("gemini-2.5-pro").WithTools([new AgentTool("search", "Searches.")]);
+
+        var result = await sut.CompleteAsync(request with { ResponseSchema = Route with { SchemaJson = "{oops" } });
+
+        result.IsSuccess.Should().BeTrue();
+        body().Should().NotBeNull();
+        logger.Warnings.Should().ContainSingle().Which.Should().Contain("function calling");
+    }
+
     [Theory]
     [InlineData("gemini-3-pro-preview")]
     [InlineData("gemini-pro-latest")]
