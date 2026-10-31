@@ -372,6 +372,20 @@ public class CohereRerankerTests
         result.Error.Code.Should().Be("AI.RerankFailed");
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"id":"r1","results":null,"meta":{}}""")]
+    public async Task RerankAsync_AnAnswerWithoutResults_IsRerankFailed_NotAnEmptyRanking(string answer)
+    {
+        var (sut, handler) = Create();
+        Capture(handler, answer);
+
+        var result = await sut.RerankAsync("q", ["a"], All, CancellationToken.None);
+
+        result.Error.Code.Should().Be("AI.RerankFailed");
+        result.Error.Message.Should().Contain("without results");
+    }
+
     [Fact]
     public async Task RerankAsync_ATransportError_IsRerankFailed()
     {
