@@ -93,13 +93,15 @@ internal sealed class MistralToolCallAssembler
 
     /// <summary>
     /// The id given to a call Mistral sent without one, so that its result can answer it
-    /// (<see cref="Message.ToolResult"/> takes no empty id). Nine letters and digits, the format of Mistral's own ids,
-    /// which its API checks on <c>tool_call_id</c>. Derived from the completion's id, the call's place among its calls,
-    /// its name and its arguments: the same response, read whole or from a stream, always gives the same id.
+    /// (<see cref="Message.ToolResult"/> takes no empty id). Nine letters and digits: the format of Mistral's own ids,
+    /// which Mistral's validator (mistral-common) requires of <c>tool_call_id</c>. Derived from the completion's id, the
+    /// call's place among its calls, its name and its arguments: the same response, read again, gives the same id. A
+    /// completion with no id gets a random part instead, so that the same call in two turns never shares an id.
     /// </summary>
     internal static string IdFor(string? completionId, int position, string name, string arguments)
     {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{completionId}\n{position}\n{name}\n{arguments}"));
+        var completion = string.IsNullOrEmpty(completionId) ? Guid.NewGuid().ToString("N") : completionId;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{completion}\n{position}\n{name}\n{arguments}"));
         var id = new char[9];
         for (var i = 0; i < id.Length; i++)
         {

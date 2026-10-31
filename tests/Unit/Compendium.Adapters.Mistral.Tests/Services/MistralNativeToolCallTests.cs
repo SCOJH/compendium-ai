@@ -234,6 +234,25 @@ public class MistralNativeToolCallTests
     }
 
     [Fact]
+    public async Task TwoResponsesWithNoCompletionId_GiveTheSameCallWithNoId_TwoIds()
+    {
+        // The id is derived from the completion's id; without one, two turns that make the same call would share a
+        // tool_call_id. A random part then keeps them apart (determinism is kept only where there is a completion id).
+        const string reply = """
+            {"id":"","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":"{}"}}]}}]}
+            """;
+
+        var first = (await CompleteAsync(reply)).ToolCalls![0].Id;
+        var second = (await CompleteAsync(reply)).ToolCalls![0].Id;
+
+        first.Should().MatchRegex("^[A-Za-z0-9]{9}$");
+        second.Should().MatchRegex("^[A-Za-z0-9]{9}$");
+        second.Should().NotBe(first);
+    }
+
+    [Fact]
     public async Task AResponseWithoutCalls_HasNone()
     {
         var response = await CompleteAsync("""
@@ -438,6 +457,9 @@ public class MistralNativeToolCallTests
     [Fact]
     public async Task AStream_GivesACallWithNoId_TheIdTheSameResponseWouldGive()
     {
+        // The id depends on the completion's id and the call, not on how they were read: a stream and a response that
+        // carry the same completion id and the same call give the same id. (In practice a stream and a response are two
+        // completions, with two ids; this pins that the reading path adds nothing.)
         var streamed = await StreamAsync(
             "mistral-large-latest",
             null,

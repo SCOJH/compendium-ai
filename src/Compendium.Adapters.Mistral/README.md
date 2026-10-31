@@ -182,8 +182,9 @@ deltas are put together: a call whole in one delta (what Mistral usually sends) 
 as a string or an object. A call that comes with no id (absent, or the schema's default `"null"`) is told apart from the
 one before it by its name: another tool's, or the same once the first call's arguments are whole JSON and the piece
 brings arguments that open an object (a header sent again continues the call). It gets an id from the adapter: nine
-letters and digits (Mistral's format), derived from the completion's id, the call's place, its name and its arguments,
-so the same response, read whole or streamed, gives the same id. A stream that reaches `[DONE]` without a
+letters and digits (the format Mistral's validator requires), derived from the completion's id, the call's place, its
+name and its arguments, so the same response, read again, gives the same id (a completion with no id gets a random part
+instead). A stream that reaches `[DONE]` without a
 `finish_reason` still ends with the calls, on a final chunk of its own; one cut before `[DONE]` while calls were under
 way ends with `AI.StreamInterrupted` (the calls may be partial), and a cancelled one with nothing more. To continue,
 send the turn back, then one result per call:
