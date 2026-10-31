@@ -12,11 +12,14 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 - **Compendium.Adapters.HuggingFace: an `IReranker` over Text Embeddings Inference's `/rerank`.** Additive:
   `AddCompendiumTeiReranker(IConfiguration | Action<TeiRerankerOptions>)` registers it, with its own options
   (`TeiReranker` section: `BaseUrl`, `ApiKey` sent as Bearer when set, `Truncate` true, `TruncationDirection` Right,
-  `MaxBatchSize` 32 — TEI's own `--max-client-batch-size` default —, `TimeoutSeconds` 10 for the whole call). The
-  documents come back by descending relevance (TEI's sigmoid score, 0 to 1), each with its index in the input; more
-  than a batch go in several requests, sent together, and are merged (equal scores keep the input order). `TopN` keeps
+  `MaxBatchSize` 32 — TEI's own `--max-client-batch-size` default —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for
+  the whole call), validated on start (`BaseUrl` absolute `http` / `https`, the others at least 1). The documents come
+  back by descending relevance (TEI's sigmoid score, 0 to 1), each with its index in the input; more than a batch go in
+  several requests, at most `MaxConcurrentBatches` at a time (TEI answers 429 at once when its per-pair permits run
+  out), and are merged (equal scores keep the input order); the first failing batch stops the others. `TopN` keeps
   the best, `ReturnDocuments` fills `Document` from the input, `Model` is not sent (a TEI server serves one model). A
-  4xx or 5xx, an unreadable answer, an index outside its batch, a transport error or the budget running out is
+  4xx or 5xx, an unreadable answer, an answer that does not rank every document of its batch exactly once, a transport
+  error or the budget running out is
   `Result.Failure(AI.RerankFailed)`, never an exception (the caller's own cancellation still throws); a blank query is
   `AI.InvalidQuery`, `TopN` below 1 `AI.InvalidRequest`, no documents an empty success with no request. No retry
   handler: a rerank runs on a short budget and its caller falls back to the order it has. The chat provider is

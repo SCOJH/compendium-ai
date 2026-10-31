@@ -106,11 +106,12 @@ var ranked = await sp.GetRequiredService<IReranker>()
 
 | Option (`TeiReranker` section) | Default | Meaning |
 |---|---|---|
-| `BaseUrl` | — | The server's URL. Required. |
+| `BaseUrl` | — | The server's URL, absolute `http` / `https`. Required. |
 | `ApiKey` | none | The server's `--api-key`, sent as `Authorization: Bearer`. |
 | `Truncate` | `true` | TEI cuts a pair longer than the model takes, rather than answering 422. |
 | `TruncationDirection` | `Right` | Which end TEI cuts. |
-| `MaxBatchSize` | `32` | Documents per request; more go in several, sent together, and are merged. TEI refuses more than its `--max-client-batch-size` (32 by default) with a 422: raise both together. |
+| `MaxBatchSize` | `32` | Documents per request; more go in several, and are merged. TEI refuses more than its `--max-client-batch-size` (32 by default) with a 422: raise both together. |
+| `MaxConcurrentBatches` | `4` | Batches in flight at once. TEI takes a permit per pair from `--max-concurrent-requests` (512 by default) and answers 429 at once when they run out. |
 | `TimeoutSeconds` | `10` | The call's budget; past it, `AI.RerankFailed`. |
 
 - On the wire: `{"query", "texts", "raw_scores": false, "return_text": false, "truncate", "truncation_direction"}`; TEI
@@ -119,8 +120,12 @@ var ranked = await sp.GetRequiredService<IReranker>()
 - `TopN` keeps the best (at least 1); `ReturnDocuments` fills `Document` from your input (the texts do not travel back);
   `Model` is not sent: the server serves one model. A blank query is `AI.InvalidQuery`; no documents, an empty success.
 - Every failure is a `Result`: a 4xx or 5xx (TEI's `{error, error_type}` in the message), an unreadable answer, an
-  index outside its batch, a transport error or the budget running out is `AI.RerankFailed`. Only your own
-  cancellation throws. No retry handler: on a rerank budget, fall back to the order you have.
+  answer that does not rank every document of its batch exactly once, a transport error or the budget running out is
+  `AI.RerankFailed`; the first failing batch stops the others. Only your own cancellation throws. No retry handler: on
+  a rerank budget, fall back to the order you have.
+- Options that cannot serve (a `BaseUrl` that is not absolute `http` / `https`, a batch size, concurrency or timeout
+  below 1) fail the start: `AddCompendiumTeiReranker` validates them on start, and a reranker built by hand answers
+  `AI.RerankFailed` before any request.
 
 ## Production checklist
 
