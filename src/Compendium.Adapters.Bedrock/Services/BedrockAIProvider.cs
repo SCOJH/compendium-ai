@@ -249,6 +249,7 @@ internal sealed class BedrockAIProvider : IAIProvider
     /// </summary>
     internal ConverseRequest BuildConverseRequest(CompletionRequest request, string modelId)
     {
+        WarnResponseSchemaNotSent(request, modelId);
         var (messages, systemBlocks) = MapMessages(request);
 
         return new ConverseRequest
@@ -265,6 +266,7 @@ internal sealed class BedrockAIProvider : IAIProvider
     /// </summary>
     internal ConverseStreamRequest BuildConverseStreamRequest(CompletionRequest request, string modelId)
     {
+        WarnResponseSchemaNotSent(request, modelId);
         var (messages, systemBlocks) = MapMessages(request);
 
         return new ConverseStreamRequest
@@ -274,6 +276,21 @@ internal sealed class BedrockAIProvider : IAIProvider
             System = systemBlocks,
             InferenceConfig = BuildInferenceConfig(request),
         };
+    }
+
+    /// <summary>
+    /// A <see cref="CompletionRequest.ResponseSchema"/> Converse is not asked to follow: the request goes without it, with
+    /// a warning (<see cref="IAIProvider.SupportsJsonSchema"/> stays <see langword="false"/>).
+    /// </summary>
+    private void WarnResponseSchemaNotSent(CompletionRequest request, string model)
+    {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            _logger.LogWarning(
+                "Bedrock does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                responseSchema.Name);
+        }
     }
 
     /// <summary>

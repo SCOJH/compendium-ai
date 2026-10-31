@@ -173,8 +173,25 @@ internal sealed class ZAiAIProvider : IAIProvider
         }
     }
 
+    /// <summary>
+    /// A <see cref="CompletionRequest.ResponseSchema"/> Z.ai is not asked to follow: the request goes without it, with
+    /// a warning (<see cref="IAIProvider.SupportsJsonSchema"/> stays <see langword="false"/>).
+    /// </summary>
+    private void WarnResponseSchemaNotSent(CompletionRequest request, string model)
+    {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            _logger.LogWarning(
+                "Z.ai does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                responseSchema.Name);
+        }
+    }
+
     private Result<ZAiChatCompletionRequest> MapToApiRequest(CompletionRequest request, string model, bool stream)
     {
+        WarnResponseSchemaNotSent(request, model);
+
         var glm = GlmDialect.Recognise(model);
 
         var messages = new List<ZAiRequestMessage>();

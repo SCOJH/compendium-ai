@@ -50,8 +50,18 @@ internal sealed class DeepSeekChatCompletionRequest
     [JsonPropertyName("tool_choice")]
     public object? ToolChoice { get; set; }
 
+    [JsonPropertyName("response_format")]
+    public DeepSeekResponseFormat? ResponseFormat { get; set; }
+
     [JsonPropertyName("user")]
     public string? User { get; set; }
+}
+
+/// <summary><c>response_format</c>: DeepSeek's JSON mode, <c>{ "type": "json_object" }</c>, with no schema.</summary>
+internal sealed class DeepSeekResponseFormat
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "json_object";
 }
 
 internal sealed class DeepSeekStreamOptions

@@ -209,8 +209,25 @@ internal sealed class OpenRouterAIProvider : IAIProvider
         }
     }
 
+    /// <summary>
+    /// A <see cref="CompletionRequest.ResponseSchema"/> OpenRouter is not asked to follow: the request goes without it, with
+    /// a warning (<see cref="IAIProvider.SupportsJsonSchema"/> stays <see langword="false"/>).
+    /// </summary>
+    private void WarnResponseSchemaNotSent(CompletionRequest request, string model)
+    {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            _logger.LogWarning(
+                "OpenRouter does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                responseSchema.Name);
+        }
+    }
+
     private OpenRouterCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, GlmModel? glm)
     {
+        WarnResponseSchemaNotSent(request, model);
+
         var messages = new List<OpenRouterMessage>();
 
         // Add system prompt if present

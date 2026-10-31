@@ -178,11 +178,28 @@ internal sealed class HuggingFaceAIProvider : IAIProvider
         return _options.DefaultChatModel;
     }
 
+    /// <summary>
+    /// A <see cref="CompletionRequest.ResponseSchema"/> the endpoint is not asked to follow: the request goes without it, with
+    /// a warning (<see cref="IAIProvider.SupportsJsonSchema"/> stays <see langword="false"/>).
+    /// </summary>
+    private void WarnResponseSchemaNotSent(CompletionRequest request, string model)
+    {
+        if (request.ResponseSchema is { } responseSchema)
+        {
+            _logger.LogWarning(
+                "Hugging Face does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                responseSchema.Name);
+        }
+    }
+
     private HuggingFaceChatCompletionRequest MapToApiRequest(
         CompletionRequest request,
         string model,
         bool stream)
     {
+        WarnResponseSchemaNotSent(request, model);
+
         var messages = new List<HuggingFaceChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
         {
