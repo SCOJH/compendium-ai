@@ -83,6 +83,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.Cohere"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.Cohere.Tests", "tests\Unit\Compendium.Adapters.Cohere.Tests\Compendium.Adapters.Cohere.Tests.csproj", "{0DF53E76-73AE-4677-BEBA-2122784F723A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZeroEntropy", "src\Compendium.Adapters.ZeroEntropy\Compendium.Adapters.ZeroEntropy.csproj", "{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compendium.Adapters.ZeroEntropy.Tests", "tests\Unit\Compendium.Adapters.ZeroEntropy.Tests\Compendium.Adapters.ZeroEntropy.Tests.csproj", "{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -236,6 +240,14 @@ Global
 		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0DF53E76-73AE-4677-BEBA-2122784F723A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{62070182-F02C-4AC4-9729-3CD517145408} = {D5280E11-41BB-435D-993D-B61E46B61922}
@@ -276,5 +288,7 @@ Global
 		{9C2F201B-FB77-47EB-82F6-D4F0D66BB59E} = {F3DEE256-1951-47C9-9528-D446CA56F260}
 		{EF079810-442A-4D39-9683-AC5E134A5CAE} = {D5280E11-41BB-435D-993D-B61E46B61922}
 		{0DF53E76-73AE-4677-BEBA-2122784F723A} = {F3DEE256-1951-47C9-9528-D446CA56F260}
+		{214ADD6A-DA0C-4FB0-9B4E-5448E7237F8B} = {D5280E11-41BB-435D-993D-B61E46B61922}
+		{FD7BBF81-D8D3-4F57-BA9F-C3BBFE56845F} = {F3DEE256-1951-47C9-9528-D446CA56F260}
 	EndGlobalSection
 EndGlobal

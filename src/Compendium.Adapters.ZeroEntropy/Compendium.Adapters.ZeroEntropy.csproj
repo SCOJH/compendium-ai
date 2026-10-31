@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Compendium.Adapters.ZeroEntropy</AssemblyName>
+    <RootNamespace>Compendium.Adapters.ZeroEntropy</RootNamespace>
+    <PackageId>Compendium.Adapters.ZeroEntropy</PackageId>
+    <Description>ZeroEntropy adapter for Compendium. Implements IReranker over ZeroEntropy's rerank API (POST /v1/models/rerank, the zerank-2, zerank-1 and zerank-1-small models): batched by count and by ZeroEntropy's request bytes, bounded in flight, every document ranked exactly once, every failure a Result.</Description>
+    <PackageTags>compendium;adapter;zeroentropy;zerank;ai;rerank;reranker;rag</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compendium framework — consumed as published NuGets per ADR-0006. -->
+    <PackageReference Include="Compendium.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <!-- System.Text.Json comes from the shared framework on both targets (NU1510 on the .NET 10 SDK). -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Compendium.Adapters.ZeroEntropy.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Compendium.Abstractions.AI\Compendium.Abstractions.AI.csproj" />
+  </ItemGroup>
+
+</Project>

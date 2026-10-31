@@ -9,6 +9,23 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Added
 
+- **Compendium.Adapters.ZeroEntropy (new package): an `IReranker` over ZeroEntropy's rerank API,
+  `POST /v1/models/rerank`.** `AddCompendiumZeroEntropyReranker(IConfiguration | Action<ZeroEntropyRerankerOptions>)`
+  registers it (`ZeroEntropyReranker` section: `BaseUrl` `https://api.zeroentropy.dev/v1` — `EuBaseUrl` for the EU
+  datacenters —, `ApiKey` required and sent as Bearer, never logged, `Model` `zerank-2` when the call's
+  `RerankOptions.Model` is unset, `Latency` (`fast` / `slow`) sent only when set, `MaxBatchSize` 1000, `MaxBatchBytes`
+  5 000 000 (and at most) — ZeroEntropy's maximum request, counted as it counts it: 150 per document plus the query and the document
+  in UTF-8 —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for the whole call), validated on start. The request is
+  `{model, query, documents, latency?}`; `top_n` is not sent, so every batch comes back whole and is checked, and `TopN`
+  keeps the best after the merge. A batch closes at `MaxBatchSize` documents or before it goes past `MaxBatchBytes`; a
+  document past it alone fails the call before any request. The documents come back by descending `relevance_score`
+  (0 to 1, which ZeroEntropy documents as depending only on the query and that document), each with its index in the
+  input; batches at most `MaxConcurrentBatches` in flight, merged (equal scores keep the input order); the first failing
+  batch stops the others. `ReturnDocuments` fills `Document` from the input. A 4xx or 5xx (ZeroEntropy's `detail` in the
+  error, each `loc: msg` of a 422), an unreadable answer, an answer that does not rank every document of its batch
+  exactly once, a transport error or the budget running out is `Result.Failure(AI.RerankFailed)`, never an exception
+  (the caller's own cancellation still throws); a blank query is `AI.InvalidQuery`, `TopN` below 1 `AI.InvalidRequest`,
+  no documents an empty success with no request. No retry handler. The release now expects 17 packages. (EIS-75c)
 - **Compendium.Adapters.Cohere (new package): an `IReranker` over Cohere's Rerank API, `POST /v2/rerank`.**
   `AddCompendiumCohereReranker(IConfiguration | Action<CohereRerankerOptions>)` registers it (`CohereReranker` section:
   `BaseUrl` `https://api.cohere.com`, `ApiKey` required and sent as Bearer, never logged, `Model` `rerank-v5.0-pro` when

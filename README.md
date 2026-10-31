@@ -1,7 +1,7 @@
 # Compendium AI Domain
 
 The **ai** domain repo of the Compendium framework (repo-per-domain topology, ADR-0007). It hosts the
-`Compendium.Abstractions.AI` abstraction, all 14 AI provider adapters and the GLM dialect they share in a single
+`Compendium.Abstractions.AI` abstraction, all 15 AI provider adapters and the GLM dialect they share in a single
 repository, so a change to the abstraction and its adapters ships as **one atomic PR** and **one release tag**.
 
 - **Framework base packages** (`Compendium.Core`, `Compendium.Abstractions`) are consumed as published
@@ -29,6 +29,7 @@ repository, so a change to the abstraction and its adapters ships as **one atomi
 | `Compendium.Adapters.Ollama` | Local-LLM inference via the Ollama HTTP API. |
 | `Compendium.Adapters.OpenAI` | OpenAI direct API — chat, streaming, embeddings, tools. |
 | `Compendium.Adapters.OpenRouter` | OpenRouter — unified access to 100+ hosted models. |
+| `Compendium.Adapters.ZeroEntropy` | ZeroEntropy's rerank API (`/v1/models/rerank`, zerank models) — an `IReranker`, batched by count and by request bytes. |
 | `Compendium.Adapters.ZAi` | Z.ai direct API (OpenAI-compatible) — the GLM models: reasoning, streaming, native tools. |
 | `Compendium.Adapters.ZAi.Glm` | The GLM dialect — no HTTP: GLM ids whatever the host's prefix, effort scale, `max_tokens` room for the reasoning, the reasoning kept apart. Used by the Z.ai, Mistral and OpenRouter adapters ([ADR-0001](docs/adr/0001-glm-dialect.md)). |
 
@@ -160,7 +161,7 @@ guide wants the word "json" and an example in the prompt; without them the answe
 
 ## Releasing
 
-Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 16 packages and publishes to
+Push a tag `v*` (e.g. `v1.1.0-preview.2`). The Release workflow packs all 17 packages and publishes to
 GitHub Packages (primary feed), then to nuget.org (Trusted Publishing, or `NUGET_API_KEY`): with neither
 credential that step fails the run, after the GitHub Packages push.
 
