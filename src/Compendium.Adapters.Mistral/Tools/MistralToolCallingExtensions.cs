@@ -30,6 +30,9 @@ public static class MistralToolCallingExtensions
     /// <summary>Key inside <see cref="CompletionResponse.Metadata"/> carrying the assistant's tool_calls.</summary>
     public const string ToolCallsMetadataKey = "mistral.tool_calls";
 
+    /// <summary>Key inside <see cref="CompletionRequest.AdditionalParameters"/> carrying the parallel_tool_calls value.</summary>
+    public const string ParallelToolCallsKey = "mistral.parallel_tool_calls";
+
     /// <summary>
     /// Attaches a tool catalog to a completion request. The model receives the tool list and may
     /// emit one or more <see cref="AgentToolInvocation"/> entries in
@@ -55,6 +58,25 @@ public static class MistralToolCallingExtensions
             dict[ToolChoiceKey] = toolChoice;
         }
 
+        return request with { AdditionalParameters = dict };
+    }
+
+    /// <summary>
+    /// Sets Mistral's <c>parallel_tool_calls</c>: with <see langword="false"/>, the model calls one tool at most per turn
+    /// ("forces the model to use single tool calling", https://docs.mistral.ai/studio/conversations/function-calling.md);
+    /// with <see langword="true"/>, it may call several in one turn, each to be answered by its own tool message. Without
+    /// this call, the field is not sent and Mistral's default applies (several allowed).
+    /// </summary>
+    /// <param name="request">The request to clone.</param>
+    /// <param name="allowed">Whether the model may call several tools in one turn.</param>
+    public static CompletionRequest WithParallelToolCalls(this CompletionRequest request, bool allowed)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var dict = new Dictionary<string, object>(request.AdditionalParameters ?? new Dictionary<string, object>())
+        {
+            [ParallelToolCallsKey] = allowed
+        };
         return request with { AdditionalParameters = dict };
     }
 

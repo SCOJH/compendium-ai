@@ -26,6 +26,13 @@ namespace Compendium.Adapters.Mistral.Services;
 /// (<see cref="GlmDialect"/>): their effort on GLM's scale, <c>max_tokens</c> with room for a reasoning they always do, and
 /// their content — always a list of <c>thinking</c> and <c>text</c> chunks, in a stream too — read apart. Every other model
 /// is sent and read exactly as before.
+/// <para>
+/// Native tool calls, for every model: an assistant <see cref="Message"/> with <see cref="Message.ToolCalls"/> goes as
+/// <c>tool_calls</c>, a tool message with <see cref="Message.ToolCallId"/> as <c>tool_call_id</c> (and the called tool's
+/// <c>name</c>, as Mistral's guide shows it). The calls come back in <see cref="CompletionResponse.ToolCalls"/> and, put
+/// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/>. A conversation without them is
+/// sent as before.
+/// </para>
 /// </remarks>
 internal sealed class MistralAIProvider : IAIProvider
 {
@@ -98,6 +105,7 @@ internal sealed class MistralAIProvider : IAIProvider
         var apiRequest = MapToApiRequest(request, model, stream: true, glm);
 
         var index = 0;
+        var toolCalls = new MistralToolCallAssembler();
         await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
         {
             if (chunk.IsFailure)
@@ -105,6 +113,9 @@ internal sealed class MistralAIProvider : IAIProvider
                 yield return Result.Failure<CompletionChunk>(chunk.Error);
                 yield break;
             }
+
+            // Every delta's tool_calls are kept, the skipped GLM ones included: the calls go out whole on the final chunk.
+            toolCalls.Add(chunk.Value.Choices.FirstOrDefault()?.Delta?.ToolCalls);
 
             CompletionChunk completionChunk;
             if (glm is null)
@@ -120,6 +131,11 @@ internal sealed class MistralAIProvider : IAIProvider
             {
                 // A GLM delta with nothing to pass on (an empty first delta, thinking not asked for): skipped.
                 continue;
+            }
+
+            if (completionChunk.IsFinal)
+            {
+                completionChunk = completionChunk with { ToolCalls = toolCalls.Build() };
             }
 
             yield return Result.Success(completionChunk);
@@ -228,12 +244,7 @@ internal sealed class MistralAIProvider : IAIProvider
         }
         foreach (var msg in request.Messages)
         {
-            messages.Add(new MistralChatMessage
-            {
-                Role = msg.Role.ToString().ToLowerInvariant(),
-                Content = msg.Content,
-                Name = msg.Name
-            });
+            messages.Add(MapToApiMessage(msg, request.Messages));
         }
 
         ApplyVision(messages, request);
@@ -263,6 +274,53 @@ internal sealed class MistralAIProvider : IAIProvider
         ApplyTools(apiRequest, request);
         ApplyResponseFormat(apiRequest, request);
         return apiRequest;
+    }
+
+    /// <summary>
+    /// One conversation message on Mistral's wire. An assistant message's <see cref="Message.ToolCalls"/> go as
+    /// <c>tool_calls</c> (their arguments as a string); a tool message's <see cref="Message.ToolCallId"/> as
+    /// <c>tool_call_id</c>, with the called tool's <c>name</c> when the caller gave none and the call is in the
+    /// conversation. On any other role, or empty, they are left out: the message is the one sent before they existed.
+    /// </summary>
+    private static MistralChatMessage MapToApiMessage(Message msg, IReadOnlyList<Message> conversation)
+    {
+        var apiMessage = new MistralChatMessage
+        {
+            Role = msg.Role.ToString().ToLowerInvariant(),
+            Content = msg.Content,
+            Name = msg.Name
+        };
+
+        if (msg.Role == MessageRole.Assistant && msg.ToolCalls is { Count: > 0 } calls)
+        {
+            apiMessage.ToolCalls = calls.Select(c => new MistralToolCall
+            {
+                Id = c.Id,
+                Function = new MistralToolCallFunction { Name = c.Name, Arguments = c.ArgumentsJson }
+            }).ToList();
+        }
+        else if (msg.Role == MessageRole.Tool && !string.IsNullOrEmpty(msg.ToolCallId))
+        {
+            apiMessage.ToolCallId = msg.ToolCallId;
+            apiMessage.Name ??= NameOfCall(conversation, msg.ToolCallId);
+        }
+
+        return apiMessage;
+    }
+
+    /// <summary>The name of the tool an assistant message of the conversation called under <paramref name="id"/>, if any.</summary>
+    private static string? NameOfCall(IReadOnlyList<Message> conversation, string id)
+    {
+        foreach (var message in conversation)
+        {
+            if (message.Role == MessageRole.Assistant
+                && message.ToolCalls?.FirstOrDefault(c => string.Equals(c.Id, id, StringComparison.Ordinal)) is { } call)
+            {
+                return call.Name;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -348,6 +406,12 @@ internal sealed class MistralAIProvider : IAIProvider
                 "auto" or "any" or "none" => toolChoice,
                 _ => new { type = "function", function = new { name = toolChoice } }
             };
+        }
+
+        if (request.AdditionalParameters.TryGetValue(MistralToolCallingExtensions.ParallelToolCallsKey, out var parallelRaw)
+            && parallelRaw is bool parallel)
+        {
+            apiRequest.ParallelToolCalls = parallel;
         }
     }
 
@@ -439,12 +503,20 @@ internal sealed class MistralAIProvider : IAIProvider
                 PromptTokens = apiResponse.Usage?.PromptTokens ?? 0,
                 CompletionTokens = apiResponse.Usage?.CompletionTokens ?? 0
             },
+            ToolCalls = message?.ToolCalls is { Count: > 0 } calls ? calls.Select(MapToToolCall).ToList() : null,
             CreatedAt = apiResponse.Created > 0
                 ? DateTimeOffset.FromUnixTimeSeconds(apiResponse.Created).UtcDateTime
                 : DateTime.UtcNow,
             Metadata = metadata
         };
     }
+
+    private static ToolCall MapToToolCall(MistralToolCall toolCall) => new()
+    {
+        Id = MistralToolCallAssembler.IdOf(toolCall.Id) ?? string.Empty,
+        Name = toolCall.Function?.Name ?? string.Empty,
+        ArgumentsJson = string.IsNullOrEmpty(toolCall.Function?.Arguments) ? "{}" : toolCall.Function.Arguments
+    };
 
     /// <summary>
     /// Mistral's <c>message.content</c> is normally a string, but for assistant replies to vision

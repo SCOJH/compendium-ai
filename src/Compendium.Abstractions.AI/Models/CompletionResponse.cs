@@ -39,6 +39,17 @@ public sealed record CompletionResponse
     public string? Reasoning { get; init; }
 
     /// <summary>
+    /// Gets the tool calls the model made through the provider's native tool calling, each with its id. It is
+    /// <see langword="null"/> when the model made none, or when the adapter does not read native tool calls.
+    /// </summary>
+    /// <remarks>
+    /// To continue the conversation, send them back on the assistant turn (<see cref="Message.Assistant(string, IReadOnlyList{ToolCall})"/>),
+    /// then one <see cref="Message.ToolResult"/> per call. Left out of JSON when <see langword="null"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ToolCall>? ToolCalls { get; init; }
+
+    /// <summary>
     /// Gets the usage statistics for this completion.
     /// </summary>
     public required UsageStats Usage { get; init; }
@@ -94,6 +105,19 @@ public sealed record CompletionChunk
     /// Gets the usage statistics (only present in final chunk).
     /// </summary>
     public UsageStats? Usage { get; init; }
+
+    /// <summary>
+    /// Gets the tool calls the model made through the provider's native tool calling, on the final chunk only. Each
+    /// call is whole: its arguments are joined from every delta that carried a piece of them. It is
+    /// <see langword="null"/> on every other chunk, when the model made no call, or when the adapter does not read
+    /// native tool calls.
+    /// </summary>
+    /// <remarks>
+    /// The final chunk's <see cref="FinishReason"/> is then usually <see cref="AI.Models.FinishReason.ToolCall"/>. Left
+    /// out of JSON when <see langword="null"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ToolCall>? ToolCalls { get; init; }
 }
 
 /// <summary>
