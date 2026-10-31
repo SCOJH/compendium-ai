@@ -39,8 +39,8 @@ jobs:
       - name: Pack domain packages (excluding tests)
         run: |
           mkdir -p artifacts
-          # 16 packable projects ship from the same tag: the Compendium.Abstractions.AI
-          # abstraction, the 14 Compendium.Adapters.* AI provider adapters and the GLM
+          # 17 packable projects ship from the same tag: the Compendium.Abstractions.AI
+          # abstraction, the 15 Compendium.Adapters.* AI provider adapters and the GLM
           # dialect (Compendium.Adapters.ZAi.Glm).
           # Every csproj under src/ is packable; none is a *.Tests project.
           while IFS= read -r csproj; do
@@ -52,7 +52,7 @@ jobs:
           done < <(find src -name '*.csproj')
           ls -la artifacts/
           count=$(ls artifacts/*.nupkg 2>/dev/null | wc -l)
-          test "$count" -ge "16" || { echo "Expected at least 16 .nupkg in artifacts/ (abstraction + 14 adapters + GLM dialect), found $count"; exit 1; }
+          test "$count" -ge "17" || { echo "Expected at least 17 .nupkg in artifacts/ (abstraction + 15 adapters + GLM dialect), found $count"; exit 1; }
 
       # GitHub Packages first: it only needs GITHUB_TOKEN, and downstream consumers
       # (Nexus Directory.Packages.props) restore from this feed.
