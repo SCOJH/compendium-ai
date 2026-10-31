@@ -189,18 +189,48 @@ public class MistralNativeToolCallTests
     }
 
     [Fact]
-    public async Task AResponse_WithACallThatHasNoArgumentsOrNoId_ReadsAnEmptyObjectAndAnEmptyId()
+    public async Task AResponse_WithACallThatHasNoArgumentsOrNoId_ReadsAnEmptyObjectAndAGeneratedId()
+    {
+        const string reply = """
+            {"id":"r","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+            """;
+
+        var response = await CompleteAsync(reply);
+
+        var call = response.ToolCalls.Should().ContainSingle().Subject;
+        call.Id.Should().MatchRegex("^[A-Za-z0-9]{9}$", "\"null\" is the schema's default, not an id: the adapter gives one in Mistral's format");
+        call.Name.Should().Be("list_transactions");
+        call.ArgumentsJson.Should().Be("{}");
+        (await CompleteAsync(reply)).ToolCalls![0].Id.Should().Be(call.Id, "the same response always gets the same id");
+        Message.ToolResult(call.Id, "[]").ToolCallId.Should().Be(call.Id, "a call with no id can be answered");
+    }
+
+    [Fact]
+    public async Task AResponse_WithSeveralCallsThatHaveNoId_GivesEachItsOwnId_AndTheyGoBackOnTheWire()
     {
         var response = await CompleteAsync("""
             {"id":"r","model":"mistral-large-latest","created":0,
              "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
-               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+               {"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+               {"id":"","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}}]}
             """);
 
-        var call = response.ToolCalls.Should().ContainSingle().Subject;
-        call.Id.Should().BeEmpty("\"null\" is the schema's default, not an id");
-        call.Name.Should().Be("list_transactions");
-        call.ArgumentsJson.Should().Be("{}");
+        var calls = response.ToolCalls!;
+        calls.Should().HaveCount(2);
+        calls.Should().OnlyContain(c => c.Id.Length == 9);
+        calls[0].Id.Should().NotBe(calls[1].Id, "each call is answered by its own id, even two identical calls");
+
+        var sent = await SendAsync(Conversation(
+            Message.User("Weather in Paris, twice?"),
+            Message.Assistant(string.Empty, calls),
+            Message.ToolResult(calls[1].Id, "{\"sky\":\"clear\"}")));
+
+        var messages = sent.GetProperty("messages");
+        messages[1].GetProperty("tool_calls")[1].GetProperty("id").GetString().Should().Be(calls[1].Id);
+        messages[2].GetProperty("tool_call_id").GetString().Should().Be(calls[1].Id);
+        messages[2].GetProperty("name").GetString().Should().Be("get_weather");
     }
 
     [Fact]
@@ -302,6 +332,125 @@ public class MistralNativeToolCallTests
                 new ToolCall { Id = "bbbbbbbb2", Name = "get_time", ArgumentsJson = "{\"tz\":\"CET\"}" },
             },
             options => options.WithStrictOrdering());
+    }
+
+    public static TheoryData<string[]> SeveralCallsWithoutTheSecondId => new()
+    {
+        // Under Mistral's default index 0, the second call with no id at all.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0},{"function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""",
+        },
+
+        // The same, with the schema's default id "null", over two deltas.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"null","function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""",
+        },
+
+        // With no index at all.
+        new[]
+        {
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"aaaaaaaa1","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},{"function":{"name":"get_time","arguments":"{\"tz\":\"CET\"}"}}]},"finish_reason":"tool_calls"}]}""",
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(SeveralCallsWithoutTheSecondId))]
+    public async Task AStream_WithASecondCallThatHasNoId_KeepsItApart(string[] deltas)
+    {
+        // A second name where the current call already has one is a second call: its name is kept, and its arguments
+        // are not joined to the first one's.
+        var chunks = await StreamAsync("mistral-large-latest", null, deltas);
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Should().HaveCount(2);
+        calls[0].Should().BeEquivalentTo(new ToolCall { Id = "aaaaaaaa1", Name = "get_weather", ArgumentsJson = "{\"city\":\"Paris\"}" });
+        calls[1].Name.Should().Be("get_time");
+        calls[1].ArgumentsJson.Should().Be("{\"tz\":\"CET\"}");
+        calls[1].Id.Should().MatchRegex("^[A-Za-z0-9]{9}$", "a call with no id gets one, so that its result can answer it");
+    }
+
+    [Fact]
+    public async Task AStream_WithTheSameToolCalledTwiceWithoutIds_KeepsTheCallsApart_OnceTheFirstArgumentsAreWhole()
+    {
+        // The same name again: a continuation while the arguments so far are not whole JSON (the pieces test above),
+        // a new call once they are.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Select(c => c.ArgumentsJson).Should().Equal("{\"city\":\"Paris\"}", "{\"city\":\"Rome\"}");
+        calls.Should().OnlyContain(c => c.Name == "get_weather");
+        calls[0].Id.Should().NotBe(calls[1].Id);
+    }
+
+    [Fact]
+    public async Task AStream_ThatRepeatsTheNameOnEveryPiece_FromAPieceWithNoArguments_KeepsOneCall()
+    {
+        // The name on every piece, the first one with no arguments yet: a repeated name continues the call.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"retrieve_payment_status","arguments":"\"T1001\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        chunks[^1].ToolCalls.Should().BeEquivalentTo(new[] { Call });
+    }
+
+    [Fact]
+    public async Task AStream_GivesACallWithNoId_TheIdTheSameResponseWouldGive()
+    {
+        var streamed = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"null","function":{"name":"list_transactions","arguments":""},"index":0}]},"finish_reason":"tool_calls"}]}""");
+        var completed = await CompleteAsync("""
+            {"id":"r","model":"mistral-large-latest","created":0,
+             "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+               {"id":"null","type":"function","function":{"name":"list_transactions","arguments":""}}]}}]}
+            """);
+
+        streamed[^1].ToolCalls.Should().ContainSingle().Which.Id.Should().Be(completed.ToolCalls![0].Id);
+    }
+
+    [Theory]
+    [InlineData("mistral-large-latest")]
+    [InlineData("zai-glm-5-3")]
+    public async Task AStream_ThatEndsWithoutAFinishReason_StillEndsWithTheCalls(string model)
+    {
+        // [DONE] comes, but no delta carried a finish_reason: the calls put together go out on a final chunk of their own.
+        var chunks = await StreamAsync(
+            model,
+            null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking."},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": \"T1001\"}"},"index":0}]},"finish_reason":null}]}""");
+
+        var last = chunks[^1];
+        last.IsFinal.Should().BeTrue();
+        last.FinishReason.Should().Be(FinishReason.ToolCall);
+        last.ToolCalls.Should().BeEquivalentTo(new[] { Call });
+        last.ContentDelta.Should().BeEmpty();
+        last.Id.Should().Be("s");
+        last.Index.Should().Be(chunks.Count - 1, "it follows the chunks before it");
+        chunks.Take(chunks.Count - 1).Should().OnlyContain(c => !c.IsFinal && c.ToolCalls == null);
+    }
+
+    [Fact]
+    public async Task AStream_ThatEndsWithoutAFinishReasonOrACall_EndsAsBefore()
+    {
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Paid."},"finish_reason":null}]}""");
+
+        chunks.Should().ContainSingle().Which.IsFinal.Should().BeFalse("no call to carry: no chunk is added");
     }
 
     [Fact]

@@ -179,7 +179,12 @@ Tool definitions are serialised into Mistral's `tools[]` array; the assistant's 
 The calls also come back as the abstraction's `ToolCall` (`Id`, `Name`, `ArgumentsJson`): in `CompletionResponse.ToolCalls`,
 and on the final chunk of a stream (`CompletionChunk.ToolCalls`, with `FinishReason.ToolCall`). A stream's `tool_calls`
 deltas are put together: a call whole in one delta (what Mistral usually sends) or in pieces, several calls, arguments
-as a string or an object. To continue, send the turn back, then one result per call:
+as a string or an object. A call that comes with no id (absent, or the schema's default `"null"`) is told apart from the
+one before it by its name: another tool's, or the same once the first call's arguments are whole JSON. It gets an id
+from the adapter: nine letters and digits (Mistral's format), derived from the completion's id, the call's place, its
+name and its arguments, so the same response, read whole or streamed, gives the same id. A stream that ends (`[DONE]`)
+without a `finish_reason` still ends with the calls, on a final chunk of its own. To continue, send the turn back, then
+one result per call:
 
 ```csharp
 conversation.Add(Message.Assistant(text, calls));              // → {"role":"assistant","content":…,"tool_calls":[…]}
