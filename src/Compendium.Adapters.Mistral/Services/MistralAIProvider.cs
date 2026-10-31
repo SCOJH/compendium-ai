@@ -31,9 +31,10 @@ namespace Compendium.Adapters.Mistral.Services;
 /// <c>tool_calls</c>, a tool message with <see cref="Message.ToolCallId"/> as <c>tool_call_id</c> (and the called tool's
 /// <c>name</c>, as Mistral's guide shows it). The calls come back in <see cref="CompletionResponse.ToolCalls"/> and, put
 /// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/> (a stream that reaches
-/// <c>[DONE]</c> without a <c>finish_reason</c> gets a final chunk of its own for them; one cut before <c>[DONE]</c> ends
-/// with <see cref="AIErrors.StreamInterrupted"/>, and a cancelled one with nothing more). A call Mistral sent without an id gets one
-/// (<see cref="MistralToolCallAssembler.IdFor"/>). A conversation without them is sent as before.
+/// <c>[DONE]</c> without a <c>finish_reason</c> gets a final chunk of its own for them; one cut before <c>[DONE]</c>, or by
+/// a read error, ends with <see cref="AIErrors.StreamInterrupted"/>, and a cancelled one with nothing more). A call
+/// Mistral sent without an id gets one (<see cref="MistralToolCallAssembler.IdFor"/>). A conversation without them is
+/// sent as before.
 /// </para>
 /// </remarks>
 internal sealed class MistralAIProvider : IAIProvider

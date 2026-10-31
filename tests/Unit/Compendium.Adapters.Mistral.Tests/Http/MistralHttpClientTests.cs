@@ -348,6 +348,37 @@ public class MistralHttpClientTests
         await act.Should().ThrowAsync<TaskCanceledException>();
     }
 
+    [Fact]
+    public async Task StreamChatCompletionAsync_WhenTheReadFails_EndsWithStreamInterrupted()
+    {
+        // Arrange: one delta, then the connection drops.
+        var (client, handler) = TestFactories.CreateHttpClient();
+        var sse = "data: {\"id\":\"s\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n";
+        handler.When(HttpMethod.Post, "*/chat/completions").Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new CutStream(System.Text.Encoding.UTF8.GetBytes(sse))),
+        });
+        var done = false;
+
+        // Act: read to the end, past the error.
+        var results = new List<Result<MistralStreamChunk>>();
+        await foreach (var r in client.StreamChatCompletionAsync(
+            new MistralChatCompletionRequest { Model = "m", Messages = new List<MistralChatMessage>() },
+            CancellationToken.None,
+            () => done = true))
+        {
+            results.Add(r);
+        }
+
+        // Assert
+        results.Should().HaveCount(2);
+        results[0].IsSuccess.Should().BeTrue();
+        results[1].IsFailure.Should().BeTrue();
+        results[1].Error.Code.Should().Be("AI.StreamInterrupted");
+        results[1].Error.Message.Should().Contain("The connection was reset.");
+        done.Should().BeFalse("no [DONE] was read");
+    }
+
     private sealed class RecordingLogger<T> : ILogger<T>
     {
         public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();

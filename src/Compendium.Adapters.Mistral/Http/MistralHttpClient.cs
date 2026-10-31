@@ -99,7 +99,8 @@ internal sealed class MistralHttpClient
 
     /// <summary>
     /// The stream's chunks. <paramref name="onDone"/> is called when its <c>[DONE]</c> is read: a stream that ends
-    /// without it was cut.
+    /// without it was cut. A read that fails (the connection dropped) ends the stream with
+    /// <see cref="AIErrors.StreamInterrupted"/>, not with the exception.
     /// </summary>
     public async IAsyncEnumerable<Result<MistralStreamChunk>> StreamChatCompletionAsync(
         MistralChatCompletionRequest request,
@@ -134,9 +135,33 @@ internal sealed class MistralHttpClient
             stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);
 
-            while (!cancellationToken.IsCancellationRequested
-                   && await reader.ReadLineAsync(cancellationToken) is { } line)
+            while (!cancellationToken.IsCancellationRequested)
             {
+                // A read that fails is the connection dropping: told as an error, never thrown out of the iterator
+                // (no yield inside a try with a catch, hence the error kept for after it).
+                string? line = null;
+                Error? interrupted = null;
+                try
+                {
+                    line = await reader.ReadLineAsync(cancellationToken);
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Mistral stream cut while reading");
+                    interrupted = AIErrors.StreamInterrupted($"The Mistral stream was cut: {ex.Message}");
+                }
+
+                if (interrupted is not null)
+                {
+                    yield return Result.Failure<MistralStreamChunk>(interrupted);
+                    yield break;
+                }
+
+                if (line is null)
+                {
+                    break;
+                }
+
                 if (string.IsNullOrEmpty(line))
                 {
                     continue;

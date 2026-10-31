@@ -19,10 +19,10 @@ namespace Compendium.Adapters.Mistral.Tools;
 /// <remarks>
 /// The pieces of one call share an <c>index</c>. A piece with no <c>index</c> continues the last call. A piece that
 /// carries an id other than its call's starts a new call, so two whole calls sent with Mistral's default index 0 stay
-/// apart. Without two ids to compare, a piece that carries a name when its call already has one starts a new call too:
-/// another tool's name, or the same name when the call's arguments are whole JSON and the piece brings arguments of its
-/// own that open an object. Otherwise a repeated name (a header sent again, with no arguments or the rest of them)
-/// continues the call. An id that is empty or the literal <c>"null"</c> (the default in Mistral's schema) counts as no
+/// apart. Without two ids to compare, a piece starts a new call too when it brings arguments that open an object while
+/// its call's arguments are already whole JSON (with no name, the new call takes its call's), or when it carries another
+/// tool's name. Otherwise a repeated name (a header sent again, with no arguments or the rest of them) continues the
+/// call. An id that is empty or the literal <c>"null"</c> (the default in Mistral's schema) counts as no
 /// id. The name is taken once, never joined. Calls keep the order in which they started.
 /// </remarks>
 internal sealed class MistralToolCallAssembler
@@ -50,7 +50,8 @@ internal sealed class MistralToolCallAssembler
                 : _calls.LastOrDefault();
             if (StartsANewCall(call, id, name, arguments))
             {
-                call = new Call();
+                // A call started by its arguments alone (no name on the piece) is the tool of the last header seen.
+                call = new Call { Name = string.IsNullOrEmpty(name) ? call?.Name : null };
                 _calls.Add(call);
                 if (piece.Index is { } newIndex)
                 {
@@ -123,13 +124,12 @@ internal sealed class MistralToolCallAssembler
             return id != call.Id;
         }
 
-        if (string.IsNullOrEmpty(name) || call.Name is null)
+        if (arguments?.TrimStart().StartsWith('{') == true && IsWholeJson(call.Arguments.ToString()))
         {
-            return false;
+            return true;
         }
 
-        return name != call.Name
-            || (arguments?.TrimStart().StartsWith('{') == true && IsWholeJson(call.Arguments.ToString()));
+        return !string.IsNullOrEmpty(name) && call.Name is not null && name != call.Name;
     }
 
     /// <summary>

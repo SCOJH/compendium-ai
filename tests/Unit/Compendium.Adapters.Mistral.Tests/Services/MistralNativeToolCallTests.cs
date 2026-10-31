@@ -441,6 +441,52 @@ public class MistralNativeToolCallTests
     }
 
     [Fact]
+    public async Task AStream_WithTheSameToolCalledTwice_SplitOpenAIStyle_KeepsTheCallsApart()
+    {
+        // No id, one index: the first call whole, its header sent again, then the second call's arguments with no name.
+        // Arguments that open an object after whole JSON start a new call, which takes the name of the last header.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var calls = chunks[^1].ToolCalls!;
+        calls.Select(c => c.ArgumentsJson).Should().Equal("{\"city\":\"Paris\"}", "{\"city\":\"Rome\"}");
+        calls.Should().OnlyContain(c => c.Name == "get_weather");
+        calls[0].Id.Should().NotBe(calls[1].Id);
+    }
+
+    [Fact]
+    public async Task AStream_CutByAReadError_EndsWithStreamInterrupted_NotWithAnException()
+    {
+        // The connection drops after the first delta: the read throws (an IOException), and the stream ends with an
+        // error the caller can read, not with the exception out of the iterator.
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var sse = "data: "
+            + """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}"""
+            + "\n\n";
+        handler.When(HttpMethod.Post, "*/chat/completions").Respond(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new CutStream(System.Text.Encoding.UTF8.GetBytes(sse))),
+        });
+
+        var results = new List<Result<CompletionChunk>>();
+        await foreach (var r in sut.StreamCompleteAsync(Conversation(Message.User("Status of transaction T1001?")), CancellationToken.None))
+        {
+            results.Add(r);
+        }
+
+        results.Should().HaveCount(2);
+        results[0].IsSuccess.Should().BeTrue();
+        results[0].Value.ToolCalls.Should().BeNull();
+        results[^1].IsFailure.Should().BeTrue();
+        results[^1].Error.Code.Should().Be(AIErrors.StreamInterrupted().Code);
+    }
+
+    [Fact]
     public async Task AStream_WhoseArgumentsAreInvalidJson_ContinuesTheCallOnTheSameName()
     {
         // Arguments that are not JSON (a model can write them) are never whole: the same name continues the call, and the

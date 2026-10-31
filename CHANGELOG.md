@@ -46,13 +46,14 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   Compendium.Adapters.Mistral sends an assistant turn's calls as `tool_calls` and a tool message as `tool_call_id`
   (plus the called tool's `name`, as Mistral's guide shows it), reads `tool_calls` from a response and, put together
   from the deltas, from a stream: grouped by `index`, a new id starting a new call — or, with no id, another tool's
-  name, or the same once the first call's arguments are whole JSON (a header sent again continues the call),
+  name, or arguments that open an object once the call's are whole JSON (a header sent again continues the call) —,
   the schema's default id `"null"` never taken as an id, a call with no id given one in Mistral's format (derived from
   the completion, so the same response, read again, gives the same id), a stream that reaches `[DONE]` without a
-  `finish_reason` still ending with its calls, and one cut before `[DONE]` with calls under way ending with
-  `AI.StreamInterrupted` rather than with partial calls. `function.arguments` is read as a string or as an object (an object used to fail the
-  response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The `mistral.tool_calls` metadata is unchanged;
-  the other adapters ignore the new fields. (ALF-22, agent-spot/backlog#510)
+  `finish_reason` still ending with its calls, and one cut before `[DONE]` with calls under way ending with the
+  existing `AI.StreamInterrupted` rather than with partial calls. `function.arguments` is read as a string or as an
+  object (an object used to fail the response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The
+  `mistral.tool_calls` metadata is unchanged; the other adapters ignore the new fields. (ALF-22,
+  agent-spot/backlog#510)
 
 ### Changed
 
@@ -75,6 +76,9 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Fixed
 
+- Compendium.Adapters.Mistral: a stream whose read fails mid-way (the connection dropped: an `IOException` from the
+  body) now ends with `Result.Failure(AI.StreamInterrupted)`, as Bedrock's does, instead of throwing the exception out
+  of the iterator. Cancellation is unchanged. (ALF-22)
 - Every streaming adapter (the 11 `*HttpClient` SSE / NDJSON read loops, plus Ollama's pull-progress loop): the loop
   now stops when `StreamReader.ReadLineAsync` returns `null` instead of testing `StreamReader.EndOfStream` before each
   read. `EndOfStream` can block the thread synchronously on a network stream while waiting for the next byte; the .NET
