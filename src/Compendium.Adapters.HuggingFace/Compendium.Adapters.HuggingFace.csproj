@@ -4,8 +4,8 @@
     <AssemblyName>Compendium.Adapters.HuggingFace</AssemblyName>
     <RootNamespace>Compendium.Adapters.HuggingFace</RootNamespace>
     <PackageId>Compendium.Adapters.HuggingFace</PackageId>
-    <Description>Hugging Face AI provider adapter for Compendium. Implements IAIProvider against Hugging Face Inference Endpoints (paid managed) and the Serverless Inference API, exposing chat completions via the OpenAI-compatible Messages API and embeddings via the feature-extraction task.</Description>
-    <PackageTags>compendium;adapter;huggingface;ai;llm;inference</PackageTags>
+    <Description>Hugging Face AI provider adapter for Compendium. Implements IAIProvider against Hugging Face Inference Endpoints (paid managed) and the Serverless Inference API, exposing chat completions via the OpenAI-compatible Messages API and embeddings via the feature-extraction task, and IReranker over a Text Embeddings Inference server's /rerank.</Description>
+    <PackageTags>compendium;adapter;huggingface;ai;llm;inference;rerank;tei</PackageTags>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
