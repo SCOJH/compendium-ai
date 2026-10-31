@@ -65,8 +65,8 @@
        on 9.x. System.Text.Json is not pinned any more: both runtimes ship it, and the
        .NET 10 SDK flags a PackageReference to it as redundant (NU1510). -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.20" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.22" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.22" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.20" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.20" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.20" />
