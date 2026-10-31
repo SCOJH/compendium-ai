@@ -7,6 +7,37 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ## [Unreleased]
 
+### Added
+
+- **A GLM dialect shared by the Z.ai, Mistral and OpenRouter adapters, and a Z.ai adapter.** A GLM model behaves the
+  same whichever host serves it. `Compendium.Adapters.ZAi.Glm` (new, no HTTP, depends on `Compendium.Abstractions.AI`
+  only) recognises a GLM id whatever the host's prefix or suffix (`glm-5.3`, `zai-glm-5-3`, `z-ai/glm-5.3:batch`,
+  `zai-org/GLM-5.3`…), knows each version's capabilities, puts the effort on GLM's scale and gives `max_tokens` room
+  for the reasoning on top of the answer's; the reasoning is read apart, only when asked for, never in `Content` /
+  `ContentDelta`, and GLM's finish reasons are mapped. `Compendium.Adapters.ZAi` (new): an `IAIProvider` for Z.ai's
+  OpenAI-compatible API — `thinking: {type: "enabled"}`, `reasoning_effort`, `reasoning_content` read into
+  `ReasoningDelta` / `Reasoning`, native tool calls (`tool_choice` limited to `auto`, anything else refused before the
+  request is sent), Z.ai's business error codes (429 + 1113 → `InsufficientCredits`), `AddCompendiumZAi`.
+  Compendium.Adapters.Mistral (`zai-glm-*`) and Compendium.Adapters.OpenRouter (`z-ai/glm-*`) send and read GLM models
+  through the dialect: on Mistral, GLM 5.3 gets `low` or `high`, never `max` (Mistral's enum stops at `xhigh`), and a
+  stream's text part with no `type` is kept; on OpenRouter, `reasoning: {effort, exclude}`, `reasoning` /
+  `reasoning_details` read apart and the trailing usage frame read, so the final chunk carries the usage. Every other
+  model is sent and read exactly as before (golden tests pin it to the byte). Design: `docs/adr/0001-glm-dialect.md`.
+  (ZAI-01, agent-spot/backlog#493)
+- **Native tool calls in the abstraction and the Mistral adapter, in a stream too.** All optional and additive in
+  `Compendium.Abstractions.AI`: `ToolCall` (`Id`, `Name`, `ArgumentsJson`), `Message.ToolCalls` (an assistant turn's
+  calls), `Message.ToolCallId` (on a `Tool` message, the call answered), `Message.Assistant(content, toolCalls)` and
+  `Message.ToolResult(toolCallId, content)`, and the calls read back in `CompletionResponse.ToolCalls` and on the final
+  `CompletionChunk.ToolCalls`, each call whole. Unset, every record serialises as before (`WhenWritingNull`).
+  Compendium.Adapters.Mistral sends an assistant turn's calls as `tool_calls` and a tool message as `tool_call_id`
+  (plus the called tool's `name`, as Mistral's guide shows it), reads `tool_calls` from a response and, put together
+  from the deltas, from a stream: grouped by `index`, a new id — or, with no id, a second name — starting a new call,
+  the schema's default id `"null"` never taken as an id, a call with no id given one in Mistral's format (derived from
+  the completion, so the same response always gives the same id), and a stream that ends without a `finish_reason`
+  still ending with its calls. `function.arguments` is read as a string or as an object (an object used to fail the
+  response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The `mistral.tool_calls` metadata is unchanged;
+  the other adapters ignore the new fields. (ALF-22, agent-spot/backlog#510)
+
 ### Changed
 
 - **Every package now targets `net9.0` and `net10.0`.** .NET 9 (STS) leaves support on 2026-11-10; .NET 10 is the
