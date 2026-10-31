@@ -9,6 +9,20 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Added
 
+- **Compendium.Adapters.Cohere (new package): an `IReranker` over Cohere's Rerank API, `POST /v2/rerank`.**
+  `AddCompendiumCohereReranker(IConfiguration | Action<CohereRerankerOptions>)` registers it (`CohereReranker` section:
+  `BaseUrl` `https://api.cohere.com`, `ApiKey` required and sent as Bearer, never logged, `Model` `rerank-v5.0-pro` when
+  the call's `RerankOptions.Model` is unset, `MaxTokensPerDoc` sent only when set, `MaxBatchSize` 1000 — Cohere's
+  recommended ceiling —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for the whole call), validated on start. The
+  request is `{model, query, documents, max_tokens_per_doc?}`; `top_n` is not sent, so every batch comes back whole and
+  is checked, and `TopN` keeps the best after the merge. The documents come back by descending `relevance_score` (0 to
+  1), each with its index in the input; more than a batch go in several requests, at most `MaxConcurrentBatches` at a
+  time, and are merged (equal scores keep the input order); the first failing batch stops the others.
+  `ReturnDocuments` fills `Document` from the input. A 4xx or 5xx (Cohere's `message` in the error), an unreadable
+  answer, an answer that does not rank every document of its batch exactly once, a transport error or the budget
+  running out is `Result.Failure(AI.RerankFailed)`, never an exception (the caller's own cancellation still throws); a
+  blank query is `AI.InvalidQuery`, `TopN` below 1 `AI.InvalidRequest`, no documents an empty success with no request.
+  No retry handler. The release now expects 16 packages. (EIS-75b)
 - **Compendium.Adapters.HuggingFace: an `IReranker` over Text Embeddings Inference's `/rerank`.** Additive:
   `AddCompendiumTeiReranker(IConfiguration | Action<TeiRerankerOptions>)` registers it, with its own options
   (`TeiReranker` section: `BaseUrl`, `ApiKey` sent as Bearer when set, `Truncate` true, `TruncationDirection` Right,
