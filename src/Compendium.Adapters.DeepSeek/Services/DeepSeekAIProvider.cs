@@ -176,7 +176,9 @@ internal sealed class DeepSeekAIProvider : IAIProvider
         ApplyTools(apiRequest, request);
 
         // DeepSeek has a JSON mode and no schema (SupportsJsonSchema stays false): ResponseSchema asks for valid JSON, and
-        // the schema itself is not sent. DeepSeek's guide wants the word "json" and an example in the prompt.
+        // the schema itself is not sent. The one exception to "not constrained, request unchanged": the request does
+        // change. DeepSeek's guide wants the word "json" and an example in the prompt; without them the answer can come
+        // back as blank content with finish_reason "stop".
         if (request.ResponseSchema is { } responseSchema)
         {
             apiRequest.ResponseFormat = new DeepSeekResponseFormat();

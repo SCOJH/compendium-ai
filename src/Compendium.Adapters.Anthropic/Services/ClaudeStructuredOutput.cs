@@ -18,7 +18,8 @@ namespace Compendium.Adapters.Anthropic.Services;
 /// <remarks>
 /// Claude always constrains to the schema it is given (<see cref="ResponseSchema.Strict"/> has no setting there), and
 /// refuses with a 400 what its subset of JSON Schema leaves out (numeric and string length bounds, among others). The
-/// thinking is not constrained, only the answer.
+/// thinking is not constrained, only the answer. Citations and a prefilled assistant turn do not go with
+/// <c>output_config.format</c>: Claude answers them with a 400, which comes back as the provider's error.
 /// </remarks>
 internal static class ClaudeStructuredOutput
 {

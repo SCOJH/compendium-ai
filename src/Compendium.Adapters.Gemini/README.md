@@ -163,8 +163,9 @@ Schema mode sets `responseMimeType: "application/json"` + `responseSchema`. JSON
 The provider-agnostic way is `CompletionRequest.ResponseSchema` (`new ResponseSchema { Name = "Weather", SchemaJson = schema }`):
 the same request on every adapter, and `IAIProvider.SupportsJsonSchema(model)` to ask first. Here it goes as
 `responseMimeType: "application/json"` + `responseJsonSchema`, which takes JSON Schema (the key above sends
-`responseSchema`, Gemini's OpenAPI subset), from Gemini 2.0. It takes precedence over the keys above. See the repository
-README, "Structured output".
+`responseSchema`, Gemini's OpenAPI subset), from Gemini 2.0. A schema and function calling go together on Gemini 3
+only: on a Gemini 2.x request with tools, the schema is not sent and a warning says so. It takes precedence over the
+keys above. See the repository README, "Structured output".
 
 ### Vision (images & files)
 

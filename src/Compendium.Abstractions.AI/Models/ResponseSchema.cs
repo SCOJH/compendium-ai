@@ -40,6 +40,14 @@ public sealed partial record ResponseSchema
     public required string Name { get; init; }
 
     /// <summary>The JSON Schema, as a JSON object.</summary>
+    /// <remarks>
+    /// It goes to the provider as written: no adapter rewrites it. The subset every constraining provider takes: each
+    /// object sets <c>additionalProperties: false</c> and lists every property in <c>required</c> (an optional one is a
+    /// union with <c>null</c>, <c>"type": ["string", "null"]</c>), which OpenAI and Azure OpenAI demand with
+    /// <see cref="Strict"/>, Claude and Bedrock always; and no <c>minimum</c> / <c>maximum</c>, <c>minLength</c> /
+    /// <c>maxLength</c>, which Claude and Bedrock refuse (Gemini ignores the length bounds). Check those in the answer
+    /// instead.
+    /// </remarks>
     public required string SchemaJson { get; init; }
 
     /// <summary>

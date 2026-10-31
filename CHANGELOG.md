@@ -20,13 +20,19 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   `response_format.json_schema` (`name`, `schema`, `strict`); OpenAI's older models (GPT-3.5, GPT-4 / GPT-4 Turbo,
   `gpt-4o-2024-05-13`, o1-mini, o1-preview, `chatgpt-*`) get the warning. Compendium.Adapters.Gemini:
   `responseMimeType: "application/json"` + `responseJsonSchema` (JSON Schema, where the existing key keeps
-  `responseSchema`), from Gemini 2.0; Gemini 1.x, `gemini-pro` and Gemma get the warning. Compendium.Adapters.Ollama:
+  `responseSchema`), from Gemini 2.0, the `-latest` aliases included; Gemini 1.x, the first `gemini-pro` /
+  `gemini-pro-vision` and Gemma get the warning, and so does a Gemini 2.x request with tools (a schema and function
+  calling go together on Gemini 3 only). Compendium.Adapters.Ollama:
   `format` with the schema (the wire field becomes a JSON value; it was never set). Compendium.Adapters.Anthropic:
   `output_config.format: {type: "json_schema", schema}` beside the reasoning's `output_config.effort`, with no beta
-  header, on Claude 4.5 and later, Fable and Mythos; older models get the warning. Compendium.Adapters.DeepSeek: its JSON
-  mode (`response_format: {type: "json_object"}`) without the schema, and the warning. Compendium.Adapters.HuggingFace,
-  Compendium.Adapters.Bedrock, Compendium.Adapters.Mercury, Compendium.Adapters.OpenRouter, Compendium.Adapters.ZAi: the
-  warning. No model listing changes. (EIS-70, agent-spot/backlog#225)
+  header, on Claude 4.5 and later, Fable and Mythos; older models get the warning. Compendium.Adapters.Bedrock: Converse's
+  `outputConfig.textFormat` (`json_schema`, the schema as a JSON string) on the same Claude models, whatever the region
+  prefix; the other models get the warning. Compendium.Adapters.DeepSeek: its JSON mode
+  (`response_format: {type: "json_object"}`) without the schema, and the warning — the one adapter whose request changes
+  without the constraint; without "json" in the prompt the answer can come back blank. Compendium.Adapters.HuggingFace,
+  Compendium.Adapters.Mercury, Compendium.Adapters.OpenRouter, Compendium.Adapters.ZAi: the warning. No adapter rewrites
+  the schema: the portable subset (`additionalProperties: false` and every property `required` on each object, no
+  numeric or length bounds) is in the README. No model listing changes. (EIS-70, agent-spot/backlog#225)
 - **A reasoning channel: an effort or a budget on the request, the reasoning apart from the answer.** All additive and
   optional in `Compendium.Abstractions.AI`: `CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low · medium ·
   high · xhigh · max, `BudgetTokens`, `IncludeReasoning`, true by default), `CompletionChunk.ReasoningDelta`,

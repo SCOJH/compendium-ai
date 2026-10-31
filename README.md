@@ -136,14 +136,23 @@ over each adapter's own `*StructuredOutputExtensions` keys, which keep their eff
 |---|---|---|
 | OpenAI | `response_format: {type: "json_schema", json_schema: {name, schema, strict}}` | GPT-4o (2024-08-06) and later, o1, o3, GPT-4.1, GPT-5…; not GPT-3.5, GPT-4 / GPT-4 Turbo, `gpt-4o-2024-05-13`, o1-mini, o1-preview, `chatgpt-*` |
 | Azure OpenAI, Mistral, LiteLLM | the same `response_format.json_schema` | always (a deployment, a Mistral chat model, the proxy: the provider answers the rest) |
-| Gemini | `generationConfig: {responseMimeType: "application/json", responseJsonSchema}` (JSON Schema; `responseSchema` left out) | `gemini-*` from 2.0; not 1.x, `gemini-pro`, Gemma |
+| Gemini | `generationConfig: {responseMimeType: "application/json", responseJsonSchema}` (JSON Schema; `responseSchema` left out) | `gemini-*` from 2.0, the `-latest` aliases included; not 1.x, the first `gemini-pro` / `gemini-pro-vision`, Gemma |
 | Ollama | `format: <schema>` | always (Ollama 0.5+) |
 | Anthropic | `output_config.format: {type: "json_schema", schema}`, beside `output_config.effort`; no beta header | Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos |
 | DeepSeek | `response_format: {type: "json_object"}`: JSON mode only, the schema is not sent (warning) | false |
-| Hugging Face, Bedrock, Mercury, OpenRouter, Z.ai | nothing (warning) | false |
+| Bedrock | `outputConfig.textFormat: {type: "json_schema", structure: {jsonSchema: {name, schema}}}` (the schema as a JSON string) | Claude Sonnet / Opus / Haiku 4.5 and later, Fable, Mythos, whatever the region prefix; the other models, not yet (warning) |
+| Hugging Face, Mercury, OpenRouter, Z.ai | nothing (warning) | false |
 
-Each provider takes its own subset of JSON Schema (Claude refuses numeric and string length bounds, Gemini ignores
-some): one the provider refuses comes back as its error.
+The schema goes to the provider as written: no adapter rewrites it, and one the provider refuses comes back as its
+error. The portable subset: every object sets `additionalProperties: false` and lists every property in `required` (an
+optional one is a union with `null`, `"type": ["string", "null"]`) — OpenAI and Azure OpenAI demand it with `Strict`,
+Claude and Bedrock always — and no `minimum` / `maximum` / `minLength` / `maxLength`, which Claude and Bedrock refuse
+(Gemini ignores the length bounds): check those in the answer. Claude takes no citations and no prefilled assistant
+turn with a schema. Gemini 2.x takes no schema with function calling: on such a request with tools the schema is not
+sent (warning); Gemini 3 takes both.
+
+DeepSeek is the one exception to "not constrained, request unchanged": its JSON mode changes the request. DeepSeek's
+guide wants the word "json" and an example in the prompt; without them the answer can come back blank.
 
 ## Releasing
 
