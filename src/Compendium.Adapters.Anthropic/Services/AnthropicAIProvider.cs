@@ -64,12 +64,13 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Anthropic message request to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            return Result.Failure<CompletionResponse>(invalid);
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
         }
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var apiRequest = MapToApiRequest(request, model, stream: false, responseSchema.Value);
         var result = await _httpClient.CreateMessageAsync(apiRequest, cancellationToken);
 
         return result.Match(
@@ -86,13 +87,14 @@ internal sealed class AnthropicAIProvider : IAIProvider
 
         _logger.LogDebug("Sending Anthropic streaming message request to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            yield return Result.Failure<CompletionChunk>(invalid);
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
             yield break;
         }
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var apiRequest = MapToApiRequest(request, model, stream: true, responseSchema.Value);
         var surfaceReasoning = request.Reasoning is { IncludeReasoning: true };
 
         var messageId = string.Empty;
@@ -264,7 +266,7 @@ internal sealed class AnthropicAIProvider : IAIProvider
         }
     }
 
-    private AnthropicMessagesRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private AnthropicMessagesRequest MapToApiRequest(CompletionRequest request, string model, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<AnthropicMessage>();
         var extraSystem = new StringBuilder();
@@ -334,29 +336,30 @@ internal sealed class AnthropicAIProvider : IAIProvider
         }
 
         // Structured output, after the reasoning: output_config may already carry its effort.
-        if (request.ResponseSchema is { } responseSchema)
+        if (responseSchema is { } schema)
         {
-            if (ClaudeStructuredOutput.Supports(model))
-            {
-                ClaudeStructuredOutput.Apply(apiRequest, responseSchema.Parse().Value);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Anthropic does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
-                    model,
-                    responseSchema.Name);
-            }
+            ClaudeStructuredOutput.Apply(apiRequest, schema);
+        }
+        else if (request.ResponseSchema is { } wanted)
+        {
+            _logger.LogWarning(
+                "Anthropic does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
+                model,
+                wanted.Name);
         }
 
         return apiRequest;
     }
 
-    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
-    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
-        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
-            ? parsed.Error
-            : null;
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
 
     private static string? CombineSystemPrompt(string? primary, StringBuilder addendum)
     {
@@ -455,7 +458,6 @@ internal sealed class AnthropicAIProvider : IAIProvider
             SupportsTools = true,
             SupportsEmbeddings = false,
             SupportsVision = info.Capabilities?.ImageInput?.Supported ?? false,
-
             PricingInputPerMillion = null,
             PricingOutputPerMillion = null,
             Metadata = metadata.Count == 0 ? null : metadata,

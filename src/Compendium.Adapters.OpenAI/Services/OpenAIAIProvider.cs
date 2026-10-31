@@ -60,12 +60,13 @@ internal sealed class OpenAIAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending OpenAI chat completion to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            return Result.Failure<CompletionResponse>(invalid);
+            return Result.Failure<CompletionResponse>(responseSchema.Error);
         }
 
-        var apiRequest = MapToApiRequest(request, model, stream: false);
+        var apiRequest = MapToApiRequest(request, model, stream: false, responseSchema.Value);
         var result = await _httpClient.CreateChatCompletionAsync(apiRequest, cancellationToken);
         return result.Match(
             r => Result.Success(MapToCompletionResponse(r)),
@@ -80,13 +81,14 @@ internal sealed class OpenAIAIProvider : IAIProvider
         var model = string.IsNullOrEmpty(request.Model) ? _options.DefaultModel : request.Model;
         _logger.LogDebug("Sending OpenAI streaming chat completion to model {Model}", model);
 
-        if (InvalidResponseSchema(request, model) is { } invalid)
+        var responseSchema = ResponseSchemaFor(request, model);
+        if (responseSchema.IsFailure)
         {
-            yield return Result.Failure<CompletionChunk>(invalid);
+            yield return Result.Failure<CompletionChunk>(responseSchema.Error);
             yield break;
         }
 
-        var apiRequest = MapToApiRequest(request, model, stream: true);
+        var apiRequest = MapToApiRequest(request, model, stream: true, responseSchema.Value);
 
         var index = 0;
         await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
@@ -208,7 +210,7 @@ internal sealed class OpenAIAIProvider : IAIProvider
         }
     }
 
-    private OpenAIChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream)
+    private OpenAIChatCompletionRequest MapToApiRequest(CompletionRequest request, string model, bool stream, JsonElement? responseSchema)
     {
         var messages = new List<OpenAIChatMessage>();
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -245,7 +247,7 @@ internal sealed class OpenAIAIProvider : IAIProvider
 
         ApplyReasoning(apiRequest, request.Reasoning);
         ApplyTools(apiRequest, request);
-        ApplyResponseFormat(apiRequest, request);
+        ApplyResponseFormat(apiRequest, request, responseSchema);
         return apiRequest;
     }
 
@@ -324,31 +326,35 @@ internal sealed class OpenAIAIProvider : IAIProvider
         && !string.Equals(model, "gpt-4", StringComparison.OrdinalIgnoreCase)
         && !NoJsonSchemaPrefixes.Any(prefix => model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The error of a <see cref="CompletionRequest.ResponseSchema"/> this adapter would send, before any request.</summary>
-    private Error? InvalidResponseSchema(CompletionRequest request, string model) =>
-        request.ResponseSchema is { } schema && SupportsJsonSchema(model) && schema.Parse() is { IsFailure: true } parsed
-            ? parsed.Error
-            : null;
+    /// <summary>
+    /// The <see cref="CompletionRequest.ResponseSchema"/> this adapter sends for <paramref name="model"/>, parsed once before
+    /// any request: none when the request has none or the model does not take one, <c>AI.InvalidRequest</c> when it is
+    /// invalid.
+    /// </summary>
+    private Result<JsonElement?> ResponseSchemaFor(CompletionRequest request, string model) =>
+        request.ResponseSchema is { } schema && SupportsJsonSchema(model)
+            ? schema.Parse().Map(parsed => (JsonElement?)parsed)
+            : Result.Success<JsonElement?>(null);
 
     /// <summary>
     /// <see cref="CompletionRequest.ResponseSchema"/> first, as <c>json_schema</c>; on a model without it, a warning and
     /// the request as it was. Then the <see cref="OpenAIStructuredOutputExtensions"/> keys and the default JSON mode, as
     /// before.
     /// </summary>
-    private void ApplyResponseFormat(OpenAIChatCompletionRequest apiRequest, CompletionRequest request)
+    private void ApplyResponseFormat(OpenAIChatCompletionRequest apiRequest, CompletionRequest request, JsonElement? responseSchema)
     {
-        if (request.ResponseSchema is { } responseSchema)
+        if (request.ResponseSchema is { } wanted)
         {
-            if (SupportsJsonSchema(apiRequest.Model))
+            if (responseSchema is { } schema)
             {
                 apiRequest.ResponseFormat = new OpenAIResponseFormat
                 {
                     Type = "json_schema",
                     JsonSchema = new OpenAIJsonSchemaFormat
                     {
-                        Name = responseSchema.Name,
-                        Schema = responseSchema.Parse().Value,
-                        Strict = responseSchema.Strict
+                        Name = wanted.Name,
+                        Schema = schema,
+                        Strict = wanted.Strict
                     }
                 };
                 return;
@@ -357,7 +363,7 @@ internal sealed class OpenAIAIProvider : IAIProvider
             _logger.LogWarning(
                 "OpenAI does not constrain model {Model} to a JSON schema: ResponseSchema {Schema} is not sent",
                 apiRequest.Model,
-                responseSchema.Name);
+                wanted.Name);
         }
 
         var parameters = request.AdditionalParameters;
