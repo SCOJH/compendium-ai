@@ -377,6 +377,7 @@ public class ZeroEntropyRerankerTests
     [InlineData(BaseUrl, "  ", "m", 5_000_000, 1000, 4, 10, "ApiKey")]
     [InlineData(BaseUrl, "ze", "", 5_000_000, 1000, 4, 10, "Model")]
     [InlineData(BaseUrl, "ze", "m", 0, 1000, 4, 10, "MaxBatchBytes")]
+    [InlineData(BaseUrl, "ze", "m", 5_000_001, 1000, 4, 10, "MaxBatchBytes must be between 1 and 5000000")]
     [InlineData(BaseUrl, "ze", "m", 5_000_000, 0, 4, 10, "MaxBatchSize")]
     [InlineData(BaseUrl, "ze", "m", 5_000_000, 1000, 0, 10, "MaxConcurrentBatches")]
     [InlineData(BaseUrl, "ze", "m", 5_000_000, 1000, 4, 0, "TimeoutSeconds")]

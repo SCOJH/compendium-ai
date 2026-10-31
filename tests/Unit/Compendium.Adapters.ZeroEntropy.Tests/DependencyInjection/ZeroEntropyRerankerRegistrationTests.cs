@@ -88,6 +88,22 @@ public class ZeroEntropyRerankerRegistrationTests
     }
 
     [Fact]
+    public void AddCompendiumZeroEntropyReranker_WithMoreBytesThanZeroEntropyTakes_FailsAtResolution()
+    {
+        var services = Services();
+
+        services.AddCompendiumZeroEntropyReranker(o =>
+        {
+            o.ApiKey = "ze";
+            o.MaxBatchBytes = 5_000_001;
+        });
+        using var sp = services.BuildServiceProvider();
+
+        ((Action)(() => sp.GetRequiredService<IReranker>())).Should().Throw<OptionsValidationException>()
+            .Which.Message.Should().Contain("MaxBatchBytes between 1 and 5000000");
+    }
+
+    [Fact]
     public void AddCompendiumZeroEntropyReranker_WithATimeoutBelowOne_FailsAtResolution()
     {
         var configuration = new ConfigurationBuilder()
@@ -172,6 +188,7 @@ public class ZeroEntropyRerankerRegistrationTests
     [InlineData("https://api.zeroentropy.dev/v1", "", "zerank-2", 5_000_000, 1000, 10, false)]
     [InlineData("https://api.zeroentropy.dev/v1", "k", " ", 5_000_000, 1000, 10, false)]
     [InlineData("https://api.zeroentropy.dev/v1", "k", "zerank-2", 0, 1000, 10, false)]
+    [InlineData("https://api.zeroentropy.dev/v1", "k", "zerank-2", 5_000_001, 1000, 10, false)]
     [InlineData("https://api.zeroentropy.dev/v1", "k", "zerank-2", 5_000_000, 0, 10, false)]
     [InlineData("https://api.zeroentropy.dev/v1", "k", "zerank-2", 5_000_000, 1000, 0, false)]
     public void ZeroEntropyRerankerOptions_IsValid(string baseUrl, string apiKey, string model, int maxBatchBytes, int maxBatchSize, int timeoutSeconds, bool expected)

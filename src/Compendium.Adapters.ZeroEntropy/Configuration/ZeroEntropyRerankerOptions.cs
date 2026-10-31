@@ -70,7 +70,8 @@ public sealed class ZeroEntropyRerankerOptions
     /// <summary>
     /// The most bytes in one request, as ZeroEntropy counts them: for each document, <see cref="BytesPerDocument"/> plus
     /// the UTF-8 length of the query and of the document. A batch is closed before it goes past them; a single document
-    /// past them fails the call before any request. Default <see cref="DefaultMaxBatchBytes"/>.
+    /// past them fails the call before any request. At most, and by default, <see cref="DefaultMaxBatchBytes"/>, ZeroEntropy's
+    /// maximum.
     /// </summary>
     public int MaxBatchBytes { get; set; } = DefaultMaxBatchBytes;
 
@@ -93,9 +94,9 @@ public sealed class ZeroEntropyRerankerOptions
     public bool EnableLogging { get; set; }
 
     /// <summary>
-    /// Whether the options can serve a request: an absolute <c>http</c> / <c>https</c> base URL, a key, a model, and
-    /// <see cref="MaxBatchSize"/>, <see cref="MaxBatchBytes"/>, <see cref="MaxConcurrentBatches"/> and
-    /// <see cref="TimeoutSeconds"/> of at least 1. Checked when the reranker is resolved
+    /// Whether the options can serve a request: an absolute <c>http</c> / <c>https</c> base URL, a key, a model,
+    /// <see cref="MaxBatchBytes"/> between 1 and <see cref="DefaultMaxBatchBytes"/>, and <see cref="MaxBatchSize"/>,
+    /// <see cref="MaxConcurrentBatches"/> and <see cref="TimeoutSeconds"/> of at least 1. Checked when the reranker is resolved
     /// (<c>AddCompendiumZeroEntropyReranker</c> validates on start) and again before each call.
     /// </summary>
     public bool IsValid() => Problem() is null;
@@ -123,9 +124,9 @@ public sealed class ZeroEntropyRerankerOptions
             return $"MaxBatchSize must be at least 1, not {MaxBatchSize}";
         }
 
-        if (MaxBatchBytes < 1)
+        if (MaxBatchBytes is < 1 or > DefaultMaxBatchBytes)
         {
-            return $"MaxBatchBytes must be at least 1, not {MaxBatchBytes}";
+            return $"MaxBatchBytes must be between 1 and {DefaultMaxBatchBytes}, not {MaxBatchBytes}";
         }
 
         if (MaxConcurrentBatches < 1)
@@ -138,7 +139,7 @@ public sealed class ZeroEntropyRerankerOptions
 
     /// <summary>The message <c>AddCompendiumZeroEntropyReranker</c> fails the start with when <see cref="IsValid"/> is false.</summary>
     internal const string InvalidMessage =
-        "ZeroEntropyRerankerOptions: BaseUrl must be an absolute http or https URL, ApiKey and Model are required, and MaxBatchSize, MaxBatchBytes, MaxConcurrentBatches and TimeoutSeconds at least 1.";
+        "ZeroEntropyRerankerOptions: BaseUrl must be an absolute http or https URL, ApiKey and Model are required, MaxBatchBytes between 1 and 5000000, and MaxBatchSize, MaxConcurrentBatches and TimeoutSeconds at least 1.";
 }
 
 /// <summary>ZeroEntropy's latency mode (<c>latency</c>).</summary>
