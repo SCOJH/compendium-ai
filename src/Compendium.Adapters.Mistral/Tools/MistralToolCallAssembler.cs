@@ -20,8 +20,9 @@ namespace Compendium.Adapters.Mistral.Tools;
 /// The pieces of one call share an <c>index</c>. A piece with no <c>index</c> continues the last call. A piece that
 /// carries an id other than its call's starts a new call, so two whole calls sent with Mistral's default index 0 stay
 /// apart. Without two ids to compare, a piece that carries a name when its call already has one starts a new call too:
-/// another tool's name, or the same name once the call's arguments are whole JSON (before that, a repeated name
-/// continues the call). An id that is empty or the literal <c>"null"</c> (the default in Mistral's schema) counts as no
+/// another tool's name, or the same name when the call's arguments are whole JSON and the piece brings arguments of its
+/// own that open an object. Otherwise a repeated name (a header sent again, with no arguments or the rest of them)
+/// continues the call. An id that is empty or the literal <c>"null"</c> (the default in Mistral's schema) counts as no
 /// id. The name is taken once, never joined. Calls keep the order in which they started.
 /// </remarks>
 internal sealed class MistralToolCallAssembler
@@ -43,10 +44,11 @@ internal sealed class MistralToolCallAssembler
         {
             var id = IdOf(piece.Id);
             var name = piece.Function?.Name;
+            var arguments = piece.Function?.Arguments;
             var call = piece.Index is { } index
                 ? _byIndex.GetValueOrDefault(index)
                 : _calls.LastOrDefault();
-            if (StartsANewCall(call, id, name))
+            if (StartsANewCall(call, id, name, arguments))
             {
                 call = new Call();
                 _calls.Add(call);
@@ -62,7 +64,7 @@ internal sealed class MistralToolCallAssembler
                 call.Name = name;
             }
 
-            call.Arguments.Append(piece.Function?.Arguments);
+            call.Arguments.Append(arguments);
         }
     }
 
@@ -107,7 +109,7 @@ internal sealed class MistralToolCallAssembler
         return new string(id);
     }
 
-    private static bool StartsANewCall([NotNullWhen(false)] Call? call, string? id, string? name)
+    private static bool StartsANewCall([NotNullWhen(false)] Call? call, string? id, string? name, string? arguments)
     {
         if (call is null)
         {
@@ -119,23 +121,34 @@ internal sealed class MistralToolCallAssembler
             return id != call.Id;
         }
 
-        return !string.IsNullOrEmpty(name)
-            && call.Name is not null
-            && (name != call.Name || IsWholeJson(call.Arguments.ToString()));
-    }
-
-    /// <summary>Whether arguments joined so far are one whole JSON value (a call's arguments can be invalid JSON).</summary>
-    private static bool IsWholeJson(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrEmpty(name) || call.Name is null)
         {
             return false;
         }
 
+        return name != call.Name
+            || (arguments?.TrimStart().StartsWith('{') == true && IsWholeJson(call.Arguments.ToString()));
+    }
+
+    /// <summary>
+    /// Whether the arguments joined so far are one whole JSON object or array. Read as a block that may go on, so a
+    /// prefix is simply not whole; only invalid JSON (a model can write it) throws, and is not whole either.
+    /// </summary>
+    private static bool IsWholeJson(string text)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(text), isFinalBlock: false, state: default);
         try
         {
-            using var document = JsonDocument.Parse(text);
-            return true;
+            while (reader.Read())
+            {
+                if (reader.CurrentDepth == 0
+                    && reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
         catch (JsonException)
         {

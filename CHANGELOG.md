@@ -33,8 +33,9 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   (plus the called tool's `name`, as Mistral's guide shows it), reads `tool_calls` from a response and, put together
   from the deltas, from a stream: grouped by `index`, a new id — or, with no id, a second name — starting a new call,
   the schema's default id `"null"` never taken as an id, a call with no id given one in Mistral's format (derived from
-  the completion, so the same response always gives the same id), and a stream that ends without a `finish_reason`
-  still ending with its calls. `function.arguments` is read as a string or as an object (an object used to fail the
+  the completion, so the same response always gives the same id), a stream that reaches `[DONE]` without a
+  `finish_reason` still ending with its calls, and one cut before `[DONE]` with calls under way ending with
+  `AI.StreamInterrupted` rather than with partial calls. `function.arguments` is read as a string or as an object (an object used to fail the
   response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The `mistral.tool_calls` metadata is unchanged;
   the other adapters ignore the new fields. (ALF-22, agent-spot/backlog#510)
 

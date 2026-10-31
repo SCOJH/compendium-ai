@@ -30,8 +30,9 @@ namespace Compendium.Adapters.Mistral.Services;
 /// Native tool calls, for every model: an assistant <see cref="Message"/> with <see cref="Message.ToolCalls"/> goes as
 /// <c>tool_calls</c>, a tool message with <see cref="Message.ToolCallId"/> as <c>tool_call_id</c> (and the called tool's
 /// <c>name</c>, as Mistral's guide shows it). The calls come back in <see cref="CompletionResponse.ToolCalls"/> and, put
-/// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/> (a stream that ends without a
-/// <c>finish_reason</c> gets a final chunk of its own for them). A call Mistral sent without an id gets one
+/// together from the stream's deltas, on the final <see cref="CompletionChunk.ToolCalls"/> (a stream that reaches
+/// <c>[DONE]</c> without a <c>finish_reason</c> gets a final chunk of its own for them; one cut before <c>[DONE]</c> ends
+/// with <see cref="AIErrors.StreamInterrupted"/>, and a cancelled one with nothing more). A call Mistral sent without an id gets one
 /// (<see cref="MistralToolCallAssembler.IdFor"/>). A conversation without them is sent as before.
 /// </para>
 /// </remarks>
@@ -107,8 +108,9 @@ internal sealed class MistralAIProvider : IAIProvider
 
         var index = 0;
         string? streamId = null;
+        var done = false;
         var toolCalls = new MistralToolCallAssembler();
-        await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken))
+        await foreach (var chunk in _httpClient.StreamChatCompletionAsync(apiRequest, cancellationToken, () => done = true))
         {
             if (chunk.IsFailure)
             {
@@ -153,11 +155,17 @@ internal sealed class MistralAIProvider : IAIProvider
             }
         }
 
-        // The stream ended ([DONE], or no more lines) with no delta carrying a finish_reason: the calls put together
-        // still go out, on a final chunk of their own. Without a call, the stream ends as before.
-        if (toolCalls.Build(streamId) is { } calls)
+        // No delta carried a finish_reason. Without a call, or once the caller cancelled (the SSE loop then stops
+        // without an exception), the stream ends as before: nothing more.
+        if (cancellationToken.IsCancellationRequested || toolCalls.Build(streamId) is not { } calls)
         {
-            yield return Result.Success(new CompletionChunk
+            yield break;
+        }
+
+        // [DONE] was read: the turn is over, and the calls put together go out on a final chunk of their own. Without
+        // [DONE], the connection was cut and the calls may be partial: never passed on as a finished turn.
+        yield return done
+            ? Result.Success(new CompletionChunk
             {
                 Id = streamId ?? string.Empty,
                 ContentDelta = string.Empty,
@@ -165,8 +173,9 @@ internal sealed class MistralAIProvider : IAIProvider
                 IsFinal = true,
                 FinishReason = FinishReason.ToolCall,
                 ToolCalls = calls,
-            });
-        }
+            })
+            : Result.Failure<CompletionChunk>(AIErrors.StreamInterrupted(
+                "The Mistral stream ended before [DONE] with tool calls under way; they may be partial and are not returned."));
     }
 
     /// <inheritdoc />

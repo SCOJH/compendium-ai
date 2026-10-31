@@ -405,6 +405,37 @@ public class MistralNativeToolCallTests
     }
 
     [Fact]
+    public async Task AStream_WhoseLastDeltaRepeatsTheCallsHeader_DoesNotMakeASecondCall()
+    {
+        // No id anywhere: the header (name, empty arguments), the arguments, then the header again with the finish reason.
+        // The repeated header brings no arguments of its own, so it is the same call, not a second call f({}).
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"city\":\"Paris\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":""},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        var call = chunks[^1].ToolCalls.Should().ContainSingle().Subject;
+        call.Name.Should().Be("get_weather");
+        call.ArgumentsJson.Should().Be("{\"city\":\"Paris\"}");
+    }
+
+    [Fact]
+    public async Task AStream_WhoseArgumentsAreInvalidJson_ContinuesTheCallOnTheSameName()
+    {
+        // Arguments that are not JSON (a model can write them) are never whole: the same name continues the call, and the
+        // arguments are passed on as written.
+        var chunks = await StreamAsync(
+            "mistral-large-latest",
+            null,
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":,"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"r","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"},"index":0}]},"finish_reason":"tool_calls"}]}""");
+
+        chunks[^1].ToolCalls.Should().ContainSingle().Which.ArgumentsJson.Should().Be("{\"city\":,{\"city\":\"Rome\"}");
+    }
+
+    [Fact]
     public async Task AStream_GivesACallWithNoId_TheIdTheSameResponseWouldGive()
     {
         var streamed = await StreamAsync(
@@ -440,6 +471,53 @@ public class MistralNativeToolCallTests
         last.Id.Should().Be("s");
         last.Index.Should().Be(chunks.Count - 1, "it follows the chunks before it");
         chunks.Take(chunks.Count - 1).Should().OnlyContain(c => !c.IsFinal && c.ToolCalls == null);
+    }
+
+    [Fact]
+    public async Task AStream_CutBeforeItsEnd_WithCalls_EndsWithStreamInterrupted_NotWithTheCalls()
+    {
+        // No finish_reason and no [DONE]: the connection was cut (a proxy, a server down). The calls may be partial, so
+        // they are not passed on as a finished turn; the stream ends with an error.
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: false,
+            cancelAfter: null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking."},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""");
+
+        results.Should().HaveCount(3, "one chunk per delta, as before, then the error");
+        results.Take(2).Should().OnlyContain(r => r.IsSuccess && !r.Value.IsFinal && r.Value.ToolCalls == null);
+        results[^1].IsFailure.Should().BeTrue();
+        results[^1].Error.Code.Should().Be(AIErrors.StreamInterrupted().Code);
+    }
+
+    [Fact]
+    public async Task AStream_CutBeforeItsEnd_WithoutACall_EndsAsBefore()
+    {
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: false,
+            cancelAfter: null,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Paid."},"finish_reason":null}]}""");
+
+        results.Should().ContainSingle().Which.IsSuccess.Should().BeTrue("no call is at stake: the stream ends as it always did");
+    }
+
+    [Fact]
+    public async Task AStream_CancelledMidCall_EndsWithNothingMore()
+    {
+        // The caller cancels after the first chunk; the SSE loop stops without an exception. What was put together so
+        // far is a cut call ({"transaction_id": ), never a final chunk, and the caller asked for nothing more.
+        var results = await StreamResultsAsync(
+            "mistral-large-latest",
+            done: true,
+            cancelAfter: 1,
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"D681PevKs","function":{"name":"retrieve_payment_status","arguments":"{\"transaction_id\": "},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\"T1001\"}"},"index":0}]},"finish_reason":null}]}""",
+            """{"id":"s","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""");
+
+        results.Should().ContainSingle("nothing is passed on once the caller cancelled")
+            .Which.Value.IsFinal.Should().BeFalse();
     }
 
     [Fact]
@@ -541,6 +619,32 @@ public class MistralNativeToolCallTests
 
         result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Message : null);
         return result.Value;
+    }
+
+    private static async Task<List<Result<CompletionChunk>>> StreamResultsAsync(
+        string model,
+        bool done,
+        int? cancelAfter,
+        params string[] deltas)
+    {
+        var (httpClient, handler) = TestFactories.CreateHttpClient();
+        var sut = TestFactories.CreateProvider(httpClient);
+        var sse = string.Concat(deltas.Select(d => "data: " + d + "\n\n")) + (done ? "data: [DONE]\n\n" : string.Empty);
+        handler.When(HttpMethod.Post, "*/chat/completions").Respond("text/event-stream", sse);
+        var request = Conversation(Message.User("Status of transaction T1001?")) with { Model = model };
+        using var cancellation = new CancellationTokenSource();
+
+        var results = new List<Result<CompletionChunk>>();
+        await foreach (var r in sut.StreamCompleteAsync(request, cancellation.Token))
+        {
+            results.Add(r);
+            if (results.Count == cancelAfter)
+            {
+                await cancellation.CancelAsync();
+            }
+        }
+
+        return results;
     }
 
     private static async Task<List<CompletionChunk>> StreamAsync(string model, ReasoningOptions? reasoning, params string[] deltas)

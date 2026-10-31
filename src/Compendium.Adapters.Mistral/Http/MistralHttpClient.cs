@@ -97,9 +97,14 @@ internal sealed class MistralHttpClient
         }
     }
 
+    /// <summary>
+    /// The stream's chunks. <paramref name="onDone"/> is called when its <c>[DONE]</c> is read: a stream that ends
+    /// without it was cut.
+    /// </summary>
     public async IAsyncEnumerable<Result<MistralStreamChunk>> StreamChatCompletionAsync(
         MistralChatCompletionRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Action? onDone = null)
     {
         HttpResponseMessage? response = null;
         Stream? stream = null;
@@ -145,6 +150,7 @@ internal sealed class MistralHttpClient
                 var data = line[6..];
                 if (data == "[DONE]")
                 {
+                    onDone?.Invoke();
                     yield break;
                 }
 
