@@ -9,6 +9,20 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
 
 ### Added
 
+- **A reasoning channel: an effort or a budget on the request, the reasoning apart from the answer.** All additive and
+  optional in `Compendium.Abstractions.AI`: `CompletionRequest.Reasoning` (`ReasoningOptions`: `Effort` low · medium ·
+  high · xhigh · max, `BudgetTokens`, `IncludeReasoning`, true by default), `CompletionChunk.ReasoningDelta`,
+  `CompletionResponse.Reasoning`, `UsageStats.ReasoningTokens`. The reasoning never comes in `Content` /
+  `ContentDelta`, is returned only when asked for, and is never to be sent back as a conversation turn. Without
+  `Reasoning`, every request and result is the one it was. Compendium.Adapters.Anthropic: adaptive thinking
+  (`thinking: {type: "adaptive"}` + `output_config.effort`) on the models that take it, `thinking: {type: "enabled",
+  budget_tokens}` with `max_tokens` raised by the budget on earlier ones, no temperature or top_p with thinking,
+  `thinking_delta` → `ReasoningDelta`, a model's unasked thinking left out. Compendium.Adapters.OpenAI:
+  `reasoning_effort`, `max_completion_tokens` instead of `max_tokens`, no sampling parameters, reasoning tokens
+  reported. Compendium.Adapters.Mistral: `reasoning_effort`, and `thinking` content chunks split into `ReasoningDelta` /
+  `Reasoning` (such a stream used to fail to deserialise). Compendium.Adapters.DeepSeek: `reasoning_content` →
+  `ReasoningDelta` / `Reasoning` when asked for. The other adapters send the request without it. (ASP-36,
+  agent-spot/backlog#36)
 - **A GLM dialect shared by the Z.ai, Mistral and OpenRouter adapters, and a Z.ai adapter.** A GLM model behaves the
   same whichever host serves it. `Compendium.Adapters.ZAi.Glm` (new, no HTTP, depends on `Compendium.Abstractions.AI`
   only) recognises a GLM id whatever the host's prefix or suffix (`glm-5.3`, `zai-glm-5-3`, `z-ai/glm-5.3:batch`,
@@ -31,9 +45,10 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   `CompletionChunk.ToolCalls`, each call whole. Unset, every record serialises as before (`WhenWritingNull`).
   Compendium.Adapters.Mistral sends an assistant turn's calls as `tool_calls` and a tool message as `tool_call_id`
   (plus the called tool's `name`, as Mistral's guide shows it), reads `tool_calls` from a response and, put together
-  from the deltas, from a stream: grouped by `index`, a new id — or, with no id, a second name — starting a new call,
+  from the deltas, from a stream: grouped by `index`, a new id starting a new call — or, with no id, another tool's
+  name, or the same once the first call's arguments are whole JSON (a header sent again continues the call),
   the schema's default id `"null"` never taken as an id, a call with no id given one in Mistral's format (derived from
-  the completion, so the same response always gives the same id), a stream that reaches `[DONE]` without a
+  the completion, so the same response, read again, gives the same id), a stream that reaches `[DONE]` without a
   `finish_reason` still ending with its calls, and one cut before `[DONE]` with calls under way ending with
   `AI.StreamInterrupted` rather than with partial calls. `function.arguments` is read as a string or as an object (an object used to fail the
   response). `WithParallelToolCalls(bool)` sends `parallel_tool_calls`. The `mistral.tool_calls` metadata is unchanged;
