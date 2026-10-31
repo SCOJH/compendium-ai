@@ -14,7 +14,7 @@ follow the `v*` tags. Earlier versions are described in the generated notes of t
   registers it (`ZeroEntropyReranker` section: `BaseUrl` `https://api.zeroentropy.dev/v1` — `EuBaseUrl` for the EU
   datacenters —, `ApiKey` required and sent as Bearer, never logged, `Model` `zerank-2` when the call's
   `RerankOptions.Model` is unset, `Latency` (`fast` / `slow`) sent only when set, `MaxBatchSize` 1000, `MaxBatchBytes`
-  5 000 000 — ZeroEntropy's maximum request, counted as it counts it: 150 per document plus the query and the document
+  5 000 000 (and at most) — ZeroEntropy's maximum request, counted as it counts it: 150 per document plus the query and the document
   in UTF-8 —, `MaxConcurrentBatches` 4, `TimeoutSeconds` 10 for the whole call), validated on start. The request is
   `{model, query, documents, latency?}`; `top_n` is not sent, so every batch comes back whole and is checked, and `TopN`
   keeps the best after the merge. A batch closes at `MaxBatchSize` documents or before it goes past `MaxBatchBytes`; a

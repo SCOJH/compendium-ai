@@ -33,8 +33,8 @@ var ranked = await reranker.RerankAsync(query, passages, new RerankOptions { Top
 | `Model` | `zerank-2` | The model when the call's `RerankOptions.Model` is unset. |
 | `Latency` | unset | `latency`, sent only when set: `Fast` answers 429 rather than fall back to the slow mode past the fast rate limit; `Slow` always takes the slow mode. Unset, ZeroEntropy tries fast and falls back to slow. |
 | `MaxBatchSize` | `1000` | Documents per request; more go in several requests, and are merged. |
-| `MaxBatchBytes` | `5000000` | Bytes per request as ZeroEntropy counts them: per document, 150 plus the query and the document in UTF-8. 5 000 000 is ZeroEntropy's maximum on every tier. |
-| `MaxConcurrentBatches` | `4` | Batches in flight at once; each counts against the key's rate limits (by default 1 000 requests and 500 000 bytes a minute, refreshed every 15 seconds; past the bytes, the slow mode, up to 5 000 000 a minute; past that, 429). |
+| `MaxBatchBytes` | `5000000` | Bytes per request as ZeroEntropy counts them: per document, 150 plus the query and the document in UTF-8. 5 000 000 is ZeroEntropy's maximum on every tier, and this option's: 1 to 5 000 000. |
+| `MaxConcurrentBatches` | `4` | Batches in flight at once; each counts against the key's rate limits (by default 1 000 requests and 500 000 bytes a minute, refreshed every 15 seconds; past the bytes, the slow mode, up to 5 000 000 a minute; past that, 429). The default 500 000 bytes a minute is a tenth of a full request: a large batch goes to the slow mode (or is answered 429 with `Latency = Fast`) and may run past the 10-second budget — lower `MaxBatchBytes` or raise `TimeoutSeconds` (or the account's limits) for large reranks. |
 | `TimeoutSeconds` | `10` | The call's budget, every batch included; past it, `AI.RerankFailed`. |
 | `EnableLogging` | `false` | Logs the request bodies at Debug. The documents are in them; the key is not. |
 
@@ -57,8 +57,8 @@ Read from https://docs.zeroentropy.dev/api-reference/models/rerank and https://d
   `loc: msg`), an unreadable answer, a transport error or the budget running out is `AI.RerankFailed`; the first failing
   batch stops the others. Only your own cancellation throws. No retry handler: on a rerank budget, fall back to the order
   you have.
-- Options that cannot serve (a `BaseUrl` that is not absolute `http` / `https`, no key or model, a batch size, byte
-  limit, concurrency or timeout below 1) fail the start: `AddCompendiumZeroEntropyReranker` validates them on start, and
+- Options that cannot serve (a `BaseUrl` that is not absolute `http` / `https`, no key or model, a byte limit
+  outside 1 to 5 000 000, a batch size, concurrency or timeout below 1) fail the start: `AddCompendiumZeroEntropyReranker` validates them on start, and
   a reranker built by hand answers `AI.RerankFailed` before any request.
 
 ## License
